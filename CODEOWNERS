@@ -1,0 +1,12 @@
+# ORIGIN-T code ownership (contribution audit)
+# Update usernames below once the repo and teammates are set up.
+
+/src/ingestion/    @S1-username
+/src/generation/   @S1-username
+/src/features/     @S1-username @S2-username
+/src/finetune/     @S3-username
+/src/evaluation/   @S3-username
+/src/risk/         @S2-username
+/src/mitigation/   @S2-username
+/dashboard/        @S3-username
+/docs/             @S1-username @S2-username @S3-username

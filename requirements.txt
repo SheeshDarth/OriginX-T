@@ -1,0 +1,31 @@
+# Core ML
+torch
+transformers
+datasets
+peft
+accelerate
+bitsandbytes
+
+# Features / classical ML
+scikit-learn
+xgboost
+sentence-transformers
+faiss-cpu
+mauve-text
+
+# Depth (gated) - install when the relevant sprint starts
+lifelines
+pycox
+mapie
+shap
+
+# Interpretability (gated) - pick ONE
+# transformer-lens
+# nnsight
+
+# Infra
+mlflow
+streamlit
+matplotlib
+seaborn
+pytest

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Data & models (large / regenerable)
+data/raw/
+data/processed/
+*.ckpt
+*.bin
+*.safetensors
+mlruns/
+wandb/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.log
