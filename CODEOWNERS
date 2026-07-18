@@ -1,12 +1,15 @@
 # ORIGIN-T code ownership (contribution audit)
-# Update usernames below once the repo and teammates are set up.
+# Role mapping (see docs/PROJECT_REPORT.md section 5):
+#   @SheeshDarth   -> S1  Data & Bench Lead        (contamination pipeline, ORIGIN-T-Bench, hidden holdout)
+#   @Revanthm2027  -> S2  Modeling Lead            (feature suite, risk models, calibration/conformal)
+#   @vishnu-k-dev  -> S3  Experiments/Infra Lead   (fine-tuning runner, eval harness, reproducibility)
 
-/src/ingestion/    @S1-username
-/src/generation/   @S1-username
-/src/features/     @S1-username @S2-username
-/src/finetune/     @S3-username
-/src/evaluation/   @S3-username
-/src/risk/         @S2-username
-/src/mitigation/   @S2-username
-/dashboard/        @S3-username
-/docs/             @S1-username @S2-username @S3-username
+/src/ingestion/    @SheeshDarth
+/src/generation/   @SheeshDarth
+/src/features/     @SheeshDarth @Revanthm2027
+/src/finetune/     @vishnu-k-dev
+/src/evaluation/   @vishnu-k-dev
+/src/risk/         @Revanthm2027
+/src/mitigation/   @Revanthm2027
+/dashboard/        @vishnu-k-dev
+/docs/             @SheeshDarth @Revanthm2027 @vishnu-k-dev
