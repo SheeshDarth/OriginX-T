@@ -4,7 +4,7 @@ import pytest
 
 from src.ingestion import Sample, write_jsonl
 from src.ingestion.check_leakage import check_files, find_leaks, text_fingerprint
-from src.ingestion.holdout import carve_holdout, is_holdout
+from src.ingestion.holdout import carve_holdout, is_holdout, main
 
 
 def make(n, prefix="c_train"):
@@ -102,3 +102,14 @@ def test_check_files_end_to_end(tmp_path):
     # now poison the training file with a holdout row
     poisoned = write_jsonl(kept + holdout[:1], tmp_path / "poisoned.jsonl")
     assert not check_files(h, [poisoned]).clean
+
+
+def test_cli_writes_split_files_that_do_not_leak(tmp_path):
+    src = write_jsonl(make(200), tmp_path / "corpus_train.jsonl")
+    assert main(["--input", str(src), "--fraction", "0.1"]) == 0
+
+    kept = tmp_path / "corpus_train_kept.jsonl"
+    held = tmp_path / "corpus_train_hidden_holdout.jsonl"
+    assert kept.exists() and held.exists()
+    assert src.read_text(encoding="utf-8")  # input left intact
+    assert check_files(held, [kept]).clean

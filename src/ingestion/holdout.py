@@ -10,10 +10,13 @@ silently leak previously-held-out samples into training.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 from dataclasses import replace
-from typing import Iterable
+from pathlib import Path
+from typing import Iterable, Optional
 
+from .loaders import load_dataset, write_jsonl
 from .schema import Sample
 
 HOLDOUT_SPLIT = "hidden_holdout"
@@ -53,3 +56,30 @@ def carve_holdout(
         else:
             kept.append(sample)
     return kept, holdout
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    """Carve each input corpus into `*_kept.jsonl` and `*_hidden_holdout.jsonl`.
+
+        python -m src.ingestion.holdout --input data/processed/wikitext2_train.jsonl
+    """
+    parser = argparse.ArgumentParser(description="Carve the hidden holdout out of a corpus.")
+    parser.add_argument("--input", required=True, nargs="+", help="normalized JSONL file(s)")
+    parser.add_argument("--fraction", type=float, default=0.1, help="holdout share (default 0.1)")
+    parser.add_argument("--salt", default="origin-t", help="split salt; changing it re-splits")
+    args = parser.parse_args(argv)
+
+    for path in args.input:
+        source = Path(path)
+        kept, holdout = carve_holdout(
+            load_dataset(source), fraction=args.fraction, salt=args.salt
+        )
+        # Write beside the input rather than over it — re-running is then non-destructive.
+        write_jsonl(kept, source.with_name(f"{source.stem}_kept.jsonl"))
+        write_jsonl(holdout, source.with_name(f"{source.stem}_hidden_holdout.jsonl"))
+        print(f"{source.name}: {len(kept)} kept, {len(holdout)} held out")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
