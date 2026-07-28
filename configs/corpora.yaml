@@ -1,0 +1,27 @@
+# Base corpora for ORIGIN-T (Sprint 0 / Month 1).
+#
+# Every entry is normalized into the canonical Sample schema as
+# {output_dir}/{name}_{split}.jsonl by:
+#
+#   python -m src.ingestion.normalize_corpora --config configs/corpora.yaml
+#
+# These are the CLEAN human baselines (source=human, generation=0). Contaminated
+# variants are produced later by src/generation, not here.
+
+output_dir: data/processed
+
+datasets:
+  - name: wikitext2
+    hf_path: wikitext
+    hf_config: wikitext-2-raw-v1
+    splits: [train, validation, test]
+    text_field: text
+    # WikiText-2 is small enough to keep whole; blank lines are dropped on load.
+
+  - name: tinystories
+    hf_path: roneneldan/TinyStories
+    hf_config: null
+    splits: [train, validation]
+    text_field: text
+    # TinyStories is large; a capped slice keeps Sprint-0 iteration fast.
+    max_rows: 50000
