@@ -25,3 +25,6 @@ wandb/
 docs/TEAM_WORKPLAN.md
 docs/EXECUTION_PLAN.md
 docs/MONTH1_PLAN.md
+
+# Fine-tuned checkpoints (regenerable)
+data/models/
