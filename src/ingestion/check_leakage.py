@@ -9,7 +9,7 @@ generators copy and rewrite text, so the same passage can reappear under a
 fresh id.
 
   1. **id overlap**    — a holdout ``sample_id`` present in a training file.
-  2. **text overlap**  — identical normalized text (case/whitespace-folded)
+  2. **text overlap**  — identical normalized text (case/whitespace/punctuation-folded)
                           under any id.
 
     python -m src.ingestion.check_leakage \
@@ -32,12 +32,15 @@ from .loaders import load_dataset
 from .schema import Sample
 
 _WHITESPACE = re.compile(r"\s+")
+# Punctuation is dropped too: benchmark_near rewrites it, and a repunctuated
+# holdout item is still a leak.
+_PUNCT = re.compile(r"[^\w\s]")
 
 
 def text_fingerprint(sample: Sample) -> str:
     """Stable hash of a sample's text, folded so trivial edits still match."""
-    combined = f"{sample.prompt}\n{sample.response}".strip().lower()
-    normalized = _WHITESPACE.sub(" ", combined)
+    combined = _PUNCT.sub("", f"{sample.prompt}\n{sample.response}".lower())
+    normalized = _WHITESPACE.sub(" ", combined).strip()
     return hashlib.blake2b(normalized.encode("utf-8"), digest_size=16).hexdigest()
 
 

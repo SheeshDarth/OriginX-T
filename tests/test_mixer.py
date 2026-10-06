@@ -74,3 +74,11 @@ def test_originals_are_not_mutated():
     pool = human()
     mix(pool, synthetic(), ratio=0.5)
     assert all(s.contamination_ratio == 0.0 for s in pool)
+
+
+def test_rejects_hidden_holdout_samples():
+    held = [Sample(sample_id="h0", response="secret", split="hidden_holdout")]
+    with pytest.raises(ValueError, match="hidden_holdout"):
+        mix(human(4), held + synthetic(3), ratio=0.25)
+    with pytest.raises(ValueError, match="hidden_holdout"):
+        mix(held + human(4), synthetic(4), ratio=0.0)

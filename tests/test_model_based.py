@@ -1,4 +1,4 @@
-﻿"""Tests for model-based contamination (synthetic / recursive / paraphrased), using a stub model."""
+"""Tests for model-based contamination (synthetic / recursive / paraphrased), using a stub model."""
 
 from src.generation import make_paraphrased, make_synthetic, mix
 from src.ingestion.schema import Sample
