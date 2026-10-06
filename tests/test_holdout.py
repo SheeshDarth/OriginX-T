@@ -59,6 +59,15 @@ def test_different_salt_gives_different_split():
     assert a != b
 
 
+def test_repeated_text_lands_on_one_side():
+    """WikiText repeats headings; split by id, copies straddle the split and the gate fails."""
+    samples = make(200) + [
+        Sample(sample_id=f"head-{i}", response="= = History = =") for i in range(50)
+    ]
+    kept, holdout = carve_holdout(samples, fraction=0.5)
+    assert find_leaks(holdout, kept).clean
+
+
 # --- leakage ---------------------------------------------------------------
 
 
