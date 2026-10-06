@@ -1,6 +1,10 @@
 {
   "config": {
-    "seed": 0,
+    "seeds": [
+      0,
+      1,
+      2
+    ],
     "device": "cuda",
     "base_model": "distilgpt2",
     "data": {
@@ -20,37 +24,97 @@
       "lora_r": 8
     },
     "generate": {
-      "max_new_tokens": 96
+      "max_new_tokens": 96,
+      "batch_size": 16
     },
     "models_dir": "data/models/collapse_spike",
     "output_dir": "reports/collapse_spike",
     "gate_min_ppl_increase": 0.05
   },
-  "generations": [
-    {
-      "generation": 0,
-      "holdout_ppl": 58.23089199278132,
-      "distinct_1": 0.16770579099179056,
-      "distinct_2": 0.6632151671527934
-    },
-    {
-      "generation": 1,
-      "holdout_ppl": 67.633085749511,
-      "distinct_1": 0.10781470324317395,
-      "distinct_2": 0.42971021515797636
-    },
-    {
-      "generation": 2,
-      "holdout_ppl": 68.56629522301691,
-      "distinct_1": 0.08331288510823927,
-      "distinct_2": 0.3143598330954211
-    },
-    {
-      "generation": 3,
-      "holdout_ppl": 68.66266488902144,
-      "distinct_1": 0.07436487016992878,
-      "distinct_2": 0.2772590748625211
-    }
-  ],
+  "runs": {
+    "0": [
+      {
+        "generation": 0,
+        "holdout_ppl": 56.11987425909956,
+        "distinct_1": 0.16770579099179056,
+        "distinct_2": 0.6632151671527934
+      },
+      {
+        "generation": 1,
+        "holdout_ppl": 65.3356661876505,
+        "distinct_1": 0.10784666139455375,
+        "distinct_2": 0.4318809537230145
+      },
+      {
+        "generation": 2,
+        "holdout_ppl": 67.12388296736923,
+        "distinct_1": 0.08265372696134399,
+        "distinct_2": 0.31347164440551784
+      },
+      {
+        "generation": 3,
+        "holdout_ppl": 67.62589354092454,
+        "distinct_1": 0.07390449647896086,
+        "distinct_2": 0.2764792047474773
+      }
+    ],
+    "1": [
+      {
+        "generation": 0,
+        "holdout_ppl": 56.61602498914472,
+        "distinct_1": 0.1693457447984611,
+        "distinct_2": 0.6638719341784605
+      },
+      {
+        "generation": 1,
+        "holdout_ppl": 65.33161201067583,
+        "distinct_1": 0.10859262805169938,
+        "distinct_2": 0.4343895769663825
+      },
+      {
+        "generation": 2,
+        "holdout_ppl": 66.69468879574059,
+        "distinct_1": 0.08378723782317202,
+        "distinct_2": 0.3177473627712062
+      },
+      {
+        "generation": 3,
+        "holdout_ppl": 67.67566648858852,
+        "distinct_1": 0.07501252818842395,
+        "distinct_2": 0.27973398890569845
+      }
+    ],
+    "2": [
+      {
+        "generation": 0,
+        "holdout_ppl": 56.27533684745028,
+        "distinct_1": 0.17009923647325456,
+        "distinct_2": 0.6639375264200058
+      },
+      {
+        "generation": 1,
+        "holdout_ppl": 65.8812363539317,
+        "distinct_1": 0.11022215872562326,
+        "distinct_2": 0.442335848181069
+      },
+      {
+        "generation": 2,
+        "holdout_ppl": 67.87174917327762,
+        "distinct_1": 0.08538839059062447,
+        "distinct_2": 0.3262497870165275
+      },
+      {
+        "generation": 3,
+        "holdout_ppl": 67.42291013052706,
+        "distinct_1": 0.07572457906591834,
+        "distinct_2": 0.28251123883942547
+      }
+    ]
+  },
+  "gate_0_per_seed": {
+    "0": true,
+    "1": true,
+    "2": true
+  },
   "gate_0_passed": true
 }

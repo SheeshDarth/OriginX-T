@@ -23,7 +23,7 @@ def test_each_generation_trains_on_the_previous_ones_output():
         human,
         generations=2,
         train=train,
-        generator_for=lambda g: lambda text: f"<m{g}>",
+        generator_for=lambda g: lambda texts: [f"<m{g}>"] * len(texts),
         evaluate=lambda g: {"holdout_ppl": 10.0 + g},
     )
 

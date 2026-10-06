@@ -10,7 +10,7 @@
 # Needs data/processed/wikitext2_train_{kept,hidden_holdout}.jsonl
 # (normalize_corpora, then holdout).
 
-seed: 0
+seeds: [0, 1, 2]        # each seed draws its own training sample; holdout is shared
 device: cuda            # "cpu" works for a tiny smoke run (shrink n_train first)
 base_model: distilgpt2
 
@@ -33,10 +33,11 @@ train:
 
 generate:
   max_new_tokens: 96
+  batch_size: 16        # texts per GPU call; lower it if generation runs out of memory
 
 models_dir: data/models/collapse_spike    # merged checkpoints, git-ignored
 output_dir: reports/collapse_spike        # metrics.json + figure, committed
 
-# GATE 0 passes when holdout perplexity at the last generation is at least
-# this much higher (relative) than at Gen-0.
+# GATE 0 passes when, for every seed, holdout perplexity at the last generation
+# is at least this much higher (relative) than at Gen-0.
 gate_min_ppl_increase: 0.05
