@@ -1,0 +1,42 @@
+# Sprint-0 collapse spike (GATE 0): does recursive training on model output
+# visibly degrade a tiny model?
+#
+#   python -m src.finetune.collapse --config configs/collapse_spike.yaml
+#
+# Gen-0 is fine-tuned on human text; each later generation is fine-tuned from
+# the same base model on the previous generation's output. Collapse shows up as
+# rising hidden-holdout perplexity and falling distinct-n.
+#
+# Needs data/processed/wikitext2_train_{kept,hidden_holdout}.jsonl
+# (normalize_corpora, then holdout).
+
+seed: 0
+device: cuda            # "cpu" works for a tiny smoke run (shrink n_train first)
+base_model: distilgpt2
+
+data:
+  kept: data/processed/wikitext2_train_kept.jsonl
+  holdout: data/processed/wikitext2_train_hidden_holdout.jsonl
+  n_train: 1000
+  n_holdout: 200
+  min_words: 20         # skip headings and fragments
+  max_words: 150        # keep prompts + continuations inside the context window
+
+generations: 3
+
+train:
+  epochs: 1
+  lr: 2.0e-4
+  batch_size: 8
+  max_len: 256
+  lora_r: 8
+
+generate:
+  max_new_tokens: 96
+
+models_dir: data/models/collapse_spike    # merged checkpoints, git-ignored
+output_dir: reports/collapse_spike        # metrics.json + figure, committed
+
+# GATE 0 passes when holdout perplexity at the last generation is at least
+# this much higher (relative) than at Gen-0.
+gate_min_ppl_increase: 0.05
