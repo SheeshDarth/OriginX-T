@@ -1,11 +1,13 @@
 """Tests for model-based contamination (synthetic / recursive / paraphrased), using a stub model."""
 
+import pytest
+
 from src.generation import make_paraphrased, make_synthetic, mix
 from src.ingestion.schema import Sample
 
 
-def echo(text):
-    return f"<gen:{text}>"
+def echo(texts):
+    return [f"<gen:{t}>" for t in texts]
 
 
 def human():
@@ -36,6 +38,22 @@ def test_paraphrase_rewrites_response_keeps_prompt():
     assert out[0].prompt == "Name a colour."
     assert "Blue." in out[0].response and out[0].response != "Blue."
     assert all(s.source == "paraphrased" and s.generation == 1 for s in out)
+
+
+def test_whole_dataset_goes_to_the_model_in_one_call():
+    calls = []
+
+    def recording(texts):
+        calls.append(texts)
+        return echo(texts)
+
+    make_synthetic(human(), recording)
+    assert calls == [["Name a colour.", "one two three"]]
+
+
+def test_rejects_generator_returning_wrong_count():
+    with pytest.raises(ValueError, match="returned 1 texts for 2 inputs"):
+        make_synthetic(human(), lambda texts: ["only one"])
 
 
 def test_output_feeds_the_mixer():
