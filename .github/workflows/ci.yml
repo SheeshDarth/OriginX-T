@@ -17,9 +17,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest
-          pip install -r requirements.txt || true
+          # Tests import torch/transformers/datasets lazily, so CI skips the
+          # heavy requirements.txt and fails loudly if a test does need them.
+          pip install ruff pytest pyyaml
       - name: Lint
-        run: ruff check src tests || true
+        run: ruff check --isolated --select F src tests  # real bugs only; style rules would flag existing code
       - name: Test
         run: pytest -q

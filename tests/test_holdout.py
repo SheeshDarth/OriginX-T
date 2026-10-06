@@ -113,3 +113,10 @@ def test_cli_writes_split_files_that_do_not_leak(tmp_path):
     assert kept.exists() and held.exists()
     assert src.read_text(encoding="utf-8")  # input left intact
     assert check_files(held, [kept]).clean
+
+
+def test_fingerprint_folds_punctuation():
+    # benchmark_near's repunctuation must not hide a leaked holdout item.
+    a = Sample(sample_id="1", response="The answer is 3, clearly.")
+    b = Sample(sample_id="2", response="the answer is 3 , clearly")
+    assert text_fingerprint(a) == text_fingerprint(b)

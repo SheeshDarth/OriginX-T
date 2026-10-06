@@ -1,4 +1,4 @@
-﻿"""ORIGIN-T contamination generation: mixing and generators."""
+"""ORIGIN-T contamination generation: mixing and generators."""
 
 from .mixer import mix, ratio_sweep
 from .benchmark_near import make_near_duplicates, perturb, similarity

@@ -56,6 +56,14 @@ def mix(
             f"have {len(contaminated)}"
         )
 
+    # Every generator feeds this function, so guarding here keeps the hidden
+    # holdout (and anything derived from it) out of every training mixture.
+    leaked = [s.sample_id for s in (*human, *contaminated) if s.split == "hidden_holdout"]
+    if leaked:
+        raise ValueError(
+            f"{len(leaked)} hidden_holdout sample(s) passed to mix(), e.g. {leaked[:3]}"
+        )
+
     rng = random.Random(seed)
     # ponytail: sample without replacement, no stratification by source/length.
     # Add stratified selection if a mixture turns out to be skewed by cluster.
