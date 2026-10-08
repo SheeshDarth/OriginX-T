@@ -51,4 +51,10 @@ keep_models: false
 output_dir: reports/grid_smoke
 figure: reports/grid_smoke/collapse_curves.png
 
-gate_min_ppl_increase: 0.05
+# Same pre-registered GATE 2 rule as configs/grid.yaml (see the comment there). This
+# grid has no 0.25 ratio, so the low dose is 0.5. With one seed the baseline spread is
+# 0. The verdict from a dry run means nothing.
+gate:
+  collapse_types: [synthetic, recursive, paraphrased]
+  monotone_tolerance: 0.005
+  low_dose_ratio: 0.5

@@ -2,12 +2,17 @@
 
 Every cell fine-tunes the base model on a dataset that is ``ratio`` contaminated
 with one contamination type, then scores it on the hidden holdout. The result is
-a collapse curve per type (holdout perplexity against contamination ratio),
-which is what GATE 2 asks about: does at least one setting measurably degrade
-the model?
+a collapse curve per type (holdout perplexity against contamination ratio).
+GATE 2 is a pre-registered rule over those curves (``evaluate_gate``): every
+collapse type must show a dose-response and clear the seed-to-seed noise at a
+low dose. ``benchmark_near`` is reported, not gated.
 
     python -m src.finetune.grid --config configs/grid.yaml
-    python -m src.finetune.grid --config configs/grid.yaml --report-only
+    python -m src.finetune.grid --config configs/grid.yaml --summarize-only
+
+``--summarize-only`` (alias ``--report-only``) trains nothing: it recomputes
+summary.json, the tables and the figure from the existing results.jsonl, and
+refuses if that file was made under different settings.
 
 Results are appended to ``{output_dir}/results.jsonl`` after every cell, so a
 run cut short by a Kaggle session limit resumes where it stopped. Each cell is
@@ -266,19 +271,144 @@ def run_grid(
     return rows
 
 
-def summarize(
-    rows: Sequence[Mapping[str, Any]], min_increase: float, *, seeds: Sequence[int]
-) -> dict[str, Any]:
-    """Collapse curves per (type, ratio) and the GATE 2 verdict.
+# A drop of exactly the tolerance counts as inside it; this absorbs float rounding at that edge.
+_DROP_EPS = 1e-9
+_GATE_KEYS = ("collapse_types", "monotone_tolerance", "low_dose_ratio")
 
-    A setting degrades when, on every seed in ``seeds``, holdout perplexity is at
-    least ``min_increase`` (relative) above that seed's ratio-0 baseline for the
-    same type. That is GATE 0's rule applied to the grid. ``seeds`` is the
-    configured list, not the seeds that happen to have rows: a seed that has not
-    finished (or has no baseline yet) cannot vouch for a setting, so a run cut
-    short can never pass GATE 2 on the seeds it got through.
+
+def validate_gate(gate: Any, *, types: Sequence[str], ratios: Sequence[float]) -> None:
+    """Raise ValueError unless the ``gate:`` config section can be evaluated on this grid."""
+    if not isinstance(gate, Mapping):
+        raise ValueError("the config needs a `gate:` section (it replaces gate_min_ppl_increase)")
+    missing = [k for k in _GATE_KEYS if k not in gate]
+    if missing:
+        raise ValueError(f"gate: is missing {missing}")
+    collapse = gate["collapse_types"]
+    if not collapse or any(t not in types or t not in CONTAMINATION_TYPES for t in collapse):
+        raise ValueError(
+            f"gate.collapse_types must be a non-empty subset of the configured types {list(types)}, "
+            f"got {collapse}"
+        )
+    if not 0 <= gate["monotone_tolerance"] < 1:
+        raise ValueError(f"gate.monotone_tolerance must be in [0, 1), got {gate['monotone_tolerance']}")
+    if gate["low_dose_ratio"] not in ratios or gate["low_dose_ratio"] <= 0:
+        raise ValueError(
+            f"gate.low_dose_ratio must be one of the configured non-zero ratios {list(ratios)}, "
+            f"got {gate['low_dose_ratio']}"
+        )
+
+
+def evaluate_gate(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    seeds: Sequence[int],
+    ratios: Sequence[float],
+    gate: Mapping[str, Any],
+) -> dict[str, Any]:
+    """GATE 2: does every collapse type degrade the model, on a pre-registered rule?
+
+    A collapse type degrades when both hold, computed from the result rows alone:
+
+    - dose-response: mean holdout perplexity across seeds is non-decreasing over
+      the configured ratios, allowing a relative drop of at most
+      ``monotone_tolerance`` between neighbouring ratios;
+    - above noise at low dose: at ``low_dose_ratio``, every seed's perplexity is
+      above that seed's own ratio-0 baseline by more than the spread (max - min)
+      of the ratio-0 baselines across seeds.
+
+    The gate passes when every type in ``collapse_types`` degrades. It cannot be
+    evaluated, and so never passes, while any cell it needs (every configured
+    ratio and seed of each collapse type) has no result. Each type carries the
+    numbers behind its verdict, so a failure says which condition failed and by
+    how much.
     """
-    baseline = {(r["type"], r["seed"]): r["holdout_ppl"] for r in rows if r["ratio"] == 0}
+    ratios, seeds = sorted(ratios), list(seeds)
+    if 0 not in ratios:
+        raise ValueError("ratios must include 0.0: every degradation is measured against it")
+    low, tolerance = gate["low_dose_ratio"], gate["monotone_tolerance"]
+    ppl = {(r["type"], r["ratio"], r["seed"]): r["holdout_ppl"] for r in rows}
+
+    types: dict[str, dict[str, Any]] = {}
+    for kind in gate["collapse_types"]:
+        missing = [Cell(kind, r, s).id for s in seeds for r in ratios if (kind, r, s) not in ppl]
+        if missing:
+            types[kind] = {"status": "not_evaluable", "missing_cells": missing}
+            continue
+
+        mean = {r: sum(ppl[(kind, r, s)] for s in seeds) / len(seeds) for r in ratios}
+        steps = []
+        for a, b in zip(ratios, ratios[1:]):
+            drop = (mean[a] - mean[b]) / mean[a]  # positive means perplexity fell
+            steps.append({
+                "from_ratio": a, "to_ratio": b, "mean_from": mean[a], "mean_to": mean[b],
+                "relative_drop": drop, "ok": drop <= tolerance + _DROP_EPS,
+            })
+        baseline = {s: ppl[(kind, 0, s)] for s in seeds}
+        spread = max(baseline.values()) - min(baseline.values())
+        per_seed = [
+            {
+                "seed": s, "baseline": baseline[s], "low_dose_ppl": ppl[(kind, low, s)],
+                "excess": ppl[(kind, low, s)] - baseline[s],
+                "ok": ppl[(kind, low, s)] - baseline[s] > spread,
+            }
+            for s in seeds
+        ]
+        dose_ok = all(st["ok"] for st in steps)
+        noise_ok = all(p["ok"] for p in per_seed)
+        failed = [name for name, ok in (("dose_response", dose_ok), ("above_noise", noise_ok)) if not ok]
+        types[kind] = {
+            "status": "fails" if failed else "degrades",
+            "failed_conditions": failed,
+            "missing_cells": [],
+            "mean_holdout_ppl": [{"ratio": r, "mean": mean[r]} for r in ratios],
+            "dose_response": {"ok": dose_ok, "tolerance": tolerance, "steps": steps},
+            "above_noise": {"ok": noise_ok, "ratio": low, "spread": spread, "seeds": per_seed},
+        }
+
+    statuses = {t["status"] for t in types.values()}
+    status = (
+        "not_evaluable" if "not_evaluable" in statuses
+        else "passed" if statuses == {"degrades"}
+        else "failed"
+    )
+    return {"rule": dict(gate), "status": status, "types": types}
+
+
+def benchmark_report(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Change in mean benchmark-item perplexity versus ratio 0, for benchmark_near. Not gated.
+
+    Leakage shows up as memorisation, so a *negative* change is the signal.
+    """
+    by_ratio: dict[float, list[float]] = {}
+    for r in rows:
+        if r["type"] == "benchmark_near":
+            by_ratio.setdefault(r["ratio"], []).append(r["benchmark_ppl"])
+    means = {ratio: sum(v) / len(v) for ratio, v in by_ratio.items()}
+    base = means.get(0)
+    return [
+        {
+            "ratio": ratio, "n_seeds": len(by_ratio[ratio]), "benchmark_ppl_mean": means[ratio],
+            "delta_vs_ratio0": None if base is None else means[ratio] - base,
+            "relative_delta": None if base is None else means[ratio] / base - 1,
+        }
+        for ratio in sorted(means)
+    ]
+
+
+def summarize(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    seeds: Sequence[int],
+    ratios: Sequence[float],
+    gate: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Collapse curves per (type, ratio), the GATE 2 verdict, and the benchmark_near report.
+
+    Everything here is computed from the result rows, so it can be re-applied to
+    finished results without training. ``seeds`` and ``ratios`` are the configured
+    ones, not whatever has rows: a run cut short cannot pass GATE 2 on what it
+    got through.
+    """
     groups: dict[tuple[str, float], list[Mapping[str, Any]]] = {}
     for r in rows:
         groups.setdefault((r["type"], r["ratio"]), []).append(r)
@@ -287,27 +417,57 @@ def summarize(
     for (kind, ratio), rs in sorted(groups.items()):
         ppl = [r["holdout_ppl"] for r in rs]
         bench = [r["benchmark_ppl"] for r in rs]
-        by_seed = {r["seed"]: r["holdout_ppl"] for r in rs}
-        rel = [
-            by_seed[s] / baseline[(kind, s)] - 1
-            for s in seeds if s in by_seed and (kind, s) in baseline
-        ]
         curves.append({
             "type": kind, "ratio": ratio, "n_seeds": len(rs),
             "holdout_ppl_mean": sum(ppl) / len(ppl), "holdout_ppl_min": min(ppl),
             "holdout_ppl_max": max(ppl),
             "benchmark_ppl_mean": sum(bench) / len(bench), "benchmark_ppl_min": min(bench),
             "benchmark_ppl_max": max(bench),
-            "rel_increase": rel,
-            "degrades": ratio > 0 and len(rel) == len(set(seeds)) and all(x >= min_increase for x in rel),
         })
-    degrading = [{"type": c["type"], "ratio": c["ratio"]} for c in curves if c["degrades"]]
+    verdict = evaluate_gate(rows, seeds=seeds, ratios=ratios, gate=gate)
     return {
-        "min_increase": min_increase,
         "curves": curves,
-        "degrading_settings": degrading,
-        "gate_2_passed": bool(degrading),
+        "gate": verdict,
+        "benchmark_near": benchmark_report(rows),
+        "gate_2_status": verdict["status"],
+        "gate_2_passed": verdict["status"] == "passed",
     }
+
+
+def format_gate(summary: Mapping[str, Any]) -> str:
+    """The GATE 2 verdict and, for each type, why, for the run log."""
+    gate = summary["gate"]
+    label = {"passed": "PASSED", "failed": "NOT PASSED", "not_evaluable": "NOT EVALUABLE (cells missing)"}
+    lines = [f"GATE 2 {label[gate['status']]}"]
+    for kind, t in gate["types"].items():
+        if t["status"] == "not_evaluable":
+            lines.append(f"  {kind}: not evaluable, {len(t['missing_cells'])} cell(s) missing")
+        elif t["status"] == "degrades":
+            lines.append(f"  {kind}: degrades")
+        else:
+            lines.append(f"  {kind}: FAILS {', '.join(t['failed_conditions'])}")
+            for st in t["dose_response"]["steps"]:
+                if not st["ok"]:
+                    lines.append(
+                        f"    dose_response: mean {st['mean_from']:.2f} at ratio {st['from_ratio']:g} -> "
+                        f"{st['mean_to']:.2f} at {st['to_ratio']:g} is a {st['relative_drop']:.2%} drop, "
+                        f"allowed {t['dose_response']['tolerance']:.2%}"
+                    )
+            noise = t["above_noise"]
+            for p in noise["seeds"]:
+                if not p["ok"]:
+                    lines.append(
+                        f"    above_noise: seed {p['seed']} is {p['excess']:+.2f} over its baseline at "
+                        f"ratio {noise['ratio']:g}, needs more than the baseline spread {noise['spread']:.2f}"
+                    )
+    bench = summary["benchmark_near"]
+    if bench:
+        lines.append("benchmark_near (reported, not gated): change in mean benchmark perplexity vs ratio 0")
+        for b in bench:
+            if b["delta_vs_ratio0"] is not None and b["ratio"] != 0:
+                lines.append(f"    ratio {b['ratio']:g}: {b['delta_vs_ratio0']:+.2f} ({b['relative_delta']:+.1%})")
+        lines.append("    (negative = the model has memorised the leaked items)")
+    return "\n".join(lines)
 
 
 def format_table(curves: Sequence[Mapping[str, Any]], key: str = "holdout_ppl_mean") -> str:
@@ -387,8 +547,9 @@ def _plot(curves: Sequence[Mapping[str, Any]], seeds: int, path: Path) -> None:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Run the Sprint-6 fine-tuning grid.")
     parser.add_argument("--config", default="configs/grid.yaml")
-    parser.add_argument("--report-only", action="store_true",
-                        help="skip training; rebuild the summary and figure from results.jsonl")
+    parser.add_argument("--summarize-only", "--report-only", dest="summarize_only", action="store_true",
+                        help="train nothing; rebuild summary.json, the tables and the figure from "
+                             "results.jsonl (refused if it was made under different settings)")
     args = parser.parse_args(argv)
 
     import yaml
@@ -401,6 +562,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         raise ValueError(
             f"recursive_depth must be an integer >= 2, got {cfg['recursive_depth']!r}"
         )
+    if "gate_min_ppl_increase" in cfg:
+        raise ValueError("gate_min_ppl_increase is replaced by the `gate:` section; see configs/grid.yaml")
+    validate_gate(cfg.get("gate"), types=cfg["types"], ratios=cfg["ratios"])
     fingerprint = config_fingerprint(cfg)
     out = Path(cfg["output_dir"])
     results_path = out / "results.jsonl"
@@ -409,7 +573,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # also means the file can hold cells this config no longer asks for. Ignore them.
     done = {k: v for k, v in load_results(results_path, fingerprint).items() if k in wanted}
 
-    if not args.report_only:
+    if not args.summarize_only:
         _train_all(cfg, cells, fingerprint, results_path, done)
 
     results = load_results(results_path, fingerprint)
@@ -422,7 +586,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if missing:
         print(f"WARNING: {len(missing)} of {len(cells)} cells have no result yet; curves are partial.")
 
-    summary = summarize(rows, cfg["gate_min_ppl_increase"], seeds=cfg["seeds"])
+    summary = summarize(rows, seeds=cfg["seeds"], ratios=cfg["ratios"], gate=cfg["gate"])
     summary["complete"] = not missing
     summary["missing_cells"] = missing
     out.mkdir(parents=True, exist_ok=True)
@@ -433,8 +597,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     _plot(summary["curves"], len({r["seed"] for r in rows}), Path(cfg["figure"]))
     print("\nMean hidden-holdout perplexity:\n" + format_table(summary["curves"]))
     print("\nMean benchmark-item perplexity:\n" + format_table(summary["curves"], "benchmark_ppl_mean"))
-    verdict = "PASSED" if summary["gate_2_passed"] else "NOT PASSED"
-    print(f"\nGATE 2 {verdict}: degrading settings {summary['degrading_settings']}")
+    print("\n" + format_gate(summary))
     return 0
 
 
