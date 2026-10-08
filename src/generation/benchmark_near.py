@@ -100,8 +100,11 @@ _PERTURBATIONS = (_recase, _respace, _repunct)
 def perturb(text: str, rng: random.Random) -> str:
     """Apply one or two surface edits. Meaning is preserved; the string is not.
 
-    The edits are mild by construction: the result keeps at least about 80% of the
-    original's whitespace-separated words and most of its GPT-2 tokens.
+    The edits are mild by construction. Over 200 seeds, on WikiText-style text the
+    result keeps at least 90% of the original's whitespace-separated words and 86% of
+    its GPT-2 pre-tokens; on punctuation-dense prose (many commas, quotes and
+    apostrophes, which ``_repunct`` rewrites) the worst case is about 74% of the
+    words and 77% of the pre-tokens.
     """
     for op in rng.sample(_PERTURBATIONS, rng.randint(1, 2)):
         text = op(text, rng)
