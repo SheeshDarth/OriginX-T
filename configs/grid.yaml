@@ -1,0 +1,66 @@
+# Sprint-6 fine-tuning grid (GATE 2): does any contamination setting measurably
+# degrade the model?
+#
+#   python -m src.finetune.grid --config configs/grid.yaml
+#   python -m src.finetune.grid --config configs/grid.yaml --report-only
+#
+# 4 types x 5 ratios x 3 seeds = 60 cells. At ratio 0 the data is all human for
+# every type, so with share_baseline one model per seed covers all four: 51
+# fine-tunes, roughly 8 hours at ~9 min each on a 6GB GPU.
+#
+# A killed run resumes where it stopped: finished cells are read back from
+# {output_dir}/results.jsonl. Changing a setting that affects results (model,
+# data, train, generate) makes that file refuse to mix, so use a new output_dir.
+#
+# Needs data/processed/wikitext2_train_{kept,hidden_holdout}.jsonl and
+# data/processed/wikitext2_validation.jsonl (normalize_corpora, then holdout).
+
+seeds: [0, 1, 2]
+ratios: [0.0, 0.25, 0.5, 0.75, 1.0]
+types: [synthetic, recursive, paraphrased, benchmark_near]
+share_baseline: true
+
+device: cuda            # "cpu" works for the smoke config only
+base_model: distilgpt2
+generator_model: distilgpt2   # writes the synthetic / recursive / paraphrased contamination
+
+data:
+  kept: data/processed/wikitext2_train_kept.jsonl
+  holdout: data/processed/wikitext2_train_hidden_holdout.jsonl
+  benchmark: data/processed/wikitext2_validation.jsonl   # source of the leaked items
+  n_train: 1000
+  n_holdout: 200
+  n_benchmark: 200
+  min_words: 20         # skip headings and fragments
+  max_words: 150        # keep prompts + continuations inside the context window
+
+benchmark_near:
+  exact_fraction: 0.3   # share of leaked items that are verbatim copies
+
+# Same recipe as the collapse spike, so the ratio-0 cells land on its Gen-0 numbers.
+train:
+  epochs: 1
+  lr: 2.0e-4
+  batch_size: 8
+  max_len: 256
+  lora_r: 8
+
+generate:
+  max_new_tokens: 96
+  batch_size: 16        # texts per GPU call; lower it if generation runs out of memory
+
+tracking:
+  backend: mlflow                       # "none" to skip logging
+  uri: sqlite:///mlruns/mlflow.db       # local file, git-ignored; view: mlflow ui --backend-store-uri <uri>
+  experiment: origin-t-grid
+
+pools_dir: data/processed/grid_pools    # generated contamination, reused on resume; git-ignored
+models_dir: data/models/grid            # git-ignored
+keep_models: false                      # true keeps ~330MB per cell (~17GB); the white-box signals need them
+output_dir: reports/grid                # results.jsonl + summary.json, committed
+figure: reports/figures/collapse_curves.png
+
+# GATE 2 counts a setting as degrading when, on every seed, holdout perplexity is
+# at least this much higher (relative) than that seed's ratio-0 baseline. Same
+# value as GATE 0; pre-register a different one before looking at results.
+gate_min_ppl_increase: 0.05
