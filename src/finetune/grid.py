@@ -14,6 +14,27 @@ low dose. ``benchmark_near`` is reported, not gated.
 summary.json, the tables and the figure from the existing results.jsonl, and
 refuses if that file was made under different settings.
 
+Changing how a contamination type is generated:
+
+    python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near
+
+Generated pools are cached under ``pools_dir/<config fingerprint>/``, and a code
+change does not change the fingerprint, so a fixed generator would silently keep
+using its old pool. Each type has a version in ``POOL_VERSIONS`` (default 1). Bump
+the type's version when its generator changes: version 1 keeps the original file
+name (``<type>_s<seed>.jsonl``, so existing pools are still reused) and a higher
+version is part of it (``<type>_v<version>_s<seed>.jsonl``), so a bump makes a new
+pool file and leaves the old one on disk. A pool built from another (``recursive``
+from ``synthetic``) goes stale with it. Rows record the version they were made
+with (``pool_version``); rows made with an older one are reported as ``stale_cells``
+and warned about, since they would mix two generators in one curve.
+
+``--rerun-types TYPE [TYPE ...]`` is how to redo those cells: it drops those types'
+contaminated rows (ratio > 0) from results.jsonl, after copying the file to
+``results.jsonl.bak-<time>`` next to it, then trains just those cells. The ratio-0
+rows are kept: they are all human, whatever the type, so the shared baselines do
+not change. It refuses results made under different settings, like resume.
+
 Results are appended to ``{output_dir}/results.jsonl`` after every cell, so a
 run cut short by a Kaggle session limit resumes where it stopped. Each cell is
 also logged as an MLflow run (see ``src.evaluation.tracking``).
@@ -78,6 +99,43 @@ _FINGERPRINT_KEYS = (
     "base_model", "generator_model", "recursive_depth", "data", "benchmark_near", "train",
     "generate", "share_baseline",
 )
+
+
+# The version of each type's pool generator (default 1). Not part of the config fingerprint
+# on purpose: bumping it must not invalidate the results of the other types. Bump a type's
+# version when the code that makes its pool changes (see the module docstring).
+#   benchmark_near 2: full-text ALL CAPS / lowercase recasing removed (PR #12).
+POOL_VERSIONS: dict[str, int] = {"benchmark_near": 2}
+# Pools built from other pools go stale with them.
+_POOL_INPUTS: dict[str, tuple[str, ...]] = {"recursive": ("synthetic",)}
+
+
+def pool_tag(kind: str) -> str:
+    """The pool's version, e.g. ``"1"``, ``"2"``, or ``"1.2"`` for a pool built from another."""
+    return ".".join(str(POOL_VERSIONS.get(k, 1)) for k in (kind, *_POOL_INPUTS.get(kind, ())))
+
+
+def _first_version_tag(kind: str) -> str:
+    return ".".join("1" for _ in pool_tag(kind).split("."))
+
+
+def pool_path(pools_dir: str | Path, kind: str, seed: int) -> Path:
+    """Where a pool is cached. The first version keeps the original file name."""
+    tag = pool_tag(kind)
+    name = f"{kind}_s{seed}.jsonl" if tag == _first_version_tag(kind) else f"{kind}_v{tag}_s{seed}.jsonl"
+    return Path(pools_dir) / name
+
+
+def stale_cells(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Cells whose contamination came from an older version of its pool generator.
+
+    Rows from before versions existed count as the first version. Ratio-0 rows have
+    no pool, so they are never stale.
+    """
+    return [
+        r["cell"] for r in rows
+        if r["ratio"] > 0 and r.get("pool_version", _first_version_tag(r["type"])) != pool_tag(r["type"])
+    ]
 
 
 @dataclass(frozen=True)
@@ -197,6 +255,37 @@ def load_results(path: str | Path, fingerprint: str) -> dict[str, dict[str, Any]
     return done
 
 
+def drop_types(
+    path: str | Path, fingerprint: str, types: Sequence[str]
+) -> tuple[dict[str, dict[str, Any]], list[str], Optional[Path]]:
+    """Remove the contaminated rows (ratio > 0) of ``types`` from a results file.
+
+    Returns ``(kept rows by cell id, dropped cell ids, backup path)``. The ratio-0
+    rows are kept even for these types: they are all human, so they are the shared
+    baselines and do not depend on the generator. Nothing is touched if the file was
+    made under different settings (``load_results`` raises first) or if there is
+    nothing to drop. Otherwise the file is first copied to ``<name>.bak-<time>``
+    beside it, then replaced by the kept rows.
+    """
+    path = Path(path)
+    rows = load_results(path, fingerprint)
+    dropped = [k for k, r in rows.items() if r["type"] in types and r["ratio"] > 0]
+    if not dropped:
+        return rows, [], None
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = path.with_name(f"{path.name}.bak-{stamp}")
+    n = 1
+    while backup.exists():  # two re-runs in the same second must not overwrite a backup
+        backup = path.with_name(f"{path.name}.bak-{stamp}-{n}")
+        n += 1
+    shutil.copy2(path, backup)
+    kept = {k: r for k, r in rows.items() if k not in set(dropped)}
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(json.dumps(r) + "\n" for r in kept.values()), encoding="utf-8")
+    tmp.replace(path)
+    return kept, dropped, backup
+
+
 def run_grid(
     cells: Sequence[Cell],
     *,
@@ -255,6 +344,7 @@ def run_grid(
                     "shared_baseline": False,
                     "n_train": len(texts),
                     "n_contaminated": sum(s.source != "human" for s in mixed),
+                    **({"pool_version": pool_tag(cell.type)} if cell.ratio > 0 else {}),
                     **metrics,
                     "distinct_1": distinct_n(texts, 1),
                     "distinct_2": distinct_n(texts, 2),
@@ -560,7 +650,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--summarize-only", "--report-only", dest="summarize_only", action="store_true",
                         help="train nothing; rebuild summary.json, the tables and the figure from "
                              "results.jsonl (refused if it was made under different settings)")
+    parser.add_argument("--rerun-types", nargs="+", metavar="TYPE",
+                        help="drop these types' contaminated rows from results.jsonl (a backup is kept "
+                             "beside it) and train just those cells again, after their generator changed")
     args = parser.parse_args(argv)
+    if args.rerun_types and args.summarize_only:
+        parser.error("--rerun-types trains, so it can not be combined with --summarize-only")
 
     import yaml
 
@@ -581,10 +676,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     wanted = {c.id for c in cells}
     # The fingerprint leaves the axes out so a finished grid can be extended, which
     # also means the file can hold cells this config no longer asks for. Ignore them.
-    done = {k: v for k, v in load_results(results_path, fingerprint).items() if k in wanted}
+    if args.rerun_types:
+        unknown = [t for t in args.rerun_types if t not in cfg["types"]]
+        if unknown:
+            raise ValueError(f"--rerun-types {unknown} are not among this config's types {cfg['types']}")
+        kept, dropped, backup = drop_types(results_path, fingerprint, args.rerun_types)
+        done = {k: v for k, v in kept.items() if k in wanted}
+        if backup is not None:
+            print(f"Dropped {len(dropped)} result(s) of {args.rerun_types}; the previous file is "
+                  f"saved as {backup}", flush=True)
+        else:
+            print(f"No contaminated results of {args.rerun_types} to drop.", flush=True)
+        cells_to_train = [c for c in cells if c.type in args.rerun_types]
+    else:
+        done = {k: v for k, v in load_results(results_path, fingerprint).items() if k in wanted}
+        cells_to_train = cells
 
     if not args.summarize_only:
-        _train_all(cfg, cells, fingerprint, results_path, done)
+        _train_all(cfg, cells_to_train, fingerprint, results_path, done)
 
     results = load_results(results_path, fingerprint)
     rows = [r for k, r in results.items() if k in wanted]
@@ -601,6 +710,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     summary["complete"] = not missing
     summary["missing_cells"] = missing
+    stale = stale_cells(rows)
+    summary["stale_cells"] = stale
+    if stale:
+        kinds = sorted({r["type"] for r in rows if r["cell"] in set(stale)})
+        print(f"WARNING: {len(stale)} cell(s) were made with an older version of their contamination "
+              f"generator, so one curve mixes two generators. Re-run them with "
+              f"--rerun-types {' '.join(kinds)}")
     out.mkdir(parents=True, exist_ok=True)
     (out / "summary.json").write_text(
         json.dumps({"config": cfg, "fingerprint": fingerprint, **summary}, indent=2),
@@ -650,7 +766,7 @@ def _train_all(
             shutil.rmtree(model_dir, ignore_errors=True)
 
     def pool_for(kind: str, seed: int) -> list[Sample]:
-        path = pools_dir / f"{kind}_s{seed}.jsonl"
+        path = pool_path(pools_dir, kind, seed)
         if path.exists():
             return load_dataset(path)
         print(f"  generating {kind} contamination for seed {seed}", flush=True)
@@ -724,7 +840,7 @@ def _train_all(
             fh.write(json.dumps(row) + "\n")
 
     todo = [c for c in cells if c.id not in done]
-    print(f"{len(cells)} cells, {len(done)} already done, {len(todo)} to run", flush=True)
+    print(f"{len(cells)} cells, {len(cells) - len(todo)} already done, {len(todo)} to run", flush=True)
     run_grid(
         cells, human_for=lambda seed: draw(seed)[0], pool_for=pool_for, train=train,
         evaluate=evaluate, release=release, track=track, on_result=on_result, done=done,

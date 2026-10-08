@@ -14,6 +14,14 @@
 # {output_dir}/results.jsonl. Changing a setting that affects results (model,
 # data, train, generate) makes that file refuse to mix, so use a new output_dir.
 #
+# Changing how a contamination type is GENERATED (src/generation/) does not change
+# this file's fingerprint, so its cached pool would be reused silently. Bump that
+# type's version in POOL_VERSIONS (src/finetune/grid.py): the pool gets a new file
+# name, and rows made with the old one are warned about. Then redo the type's cells:
+#   python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near
+# It saves results.jsonl as results.jsonl.bak-<time>, drops that type's contaminated
+# rows (the ratio-0 baselines stay) and trains just those cells.
+#
 # Needs data/processed/wikitext2_train_{kept,hidden_holdout}.jsonl and
 # data/processed/wikitext2_validation.jsonl (normalize_corpora, then holdout).
 

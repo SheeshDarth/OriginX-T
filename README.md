@@ -113,6 +113,7 @@ python -m src.finetune.collapse --config configs/collapse_spike.yaml   # GATE 0 
 python -m src.finetune.grid --config configs/grid_smoke.yaml           # minutes: dry run of the grid
 python -m src.finetune.grid --config configs/grid.yaml                 # the full grid (resumable)
 python -m src.finetune.grid --config configs/grid.yaml --summarize-only   # re-apply GATE 2, redraw the figure; trains nothing
+python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near   # redo one type's cells after its generator changed
 ```
 
 GPU work (fine-tuning) runs on free Google Colab / Kaggle notebooks — see
