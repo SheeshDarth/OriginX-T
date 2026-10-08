@@ -14,6 +14,7 @@ share_baseline: true
 device: cuda            # "cpu" also works at this size
 base_model: distilgpt2
 generator_model: distilgpt2
+recursive_depth: 2      # see configs/grid.yaml; costs recursive_depth - 1 extra fine-tunes per seed
 
 data:
   kept: data/processed/wikitext2_train_kept.jsonl
