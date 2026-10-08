@@ -28,3 +28,6 @@ docs/MONTH1_PLAN.md
 
 # Fine-tuned checkpoints (regenerable)
 data/models/
+
+# Dry-run output of configs/grid_smoke.yaml (numbers are meaningless)
+reports/grid_smoke/

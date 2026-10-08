@@ -6,7 +6,9 @@
 #
 # 4 types x 5 ratios x 3 seeds = 60 cells. At ratio 0 the data is all human for
 # every type, so with share_baseline one model per seed covers all four: 51
-# fine-tunes, roughly 8 hours at ~9 min each on a 6GB GPU.
+# fine-tunes. Building the recursive contamination fine-tunes recursive_depth - 1
+# more models per seed (3 at depth 2). About 54 fine-tunes at ~9 min each on a
+# 6GB GPU, roughly 8 hours.
 #
 # A killed run resumes where it stopped: finished cells are read back from
 # {output_dir}/results.jsonl. Changing a setting that affects results (model,
@@ -22,10 +24,16 @@ share_baseline: true
 
 device: cuda            # "cpu" works for the smoke config only
 base_model: distilgpt2
-# Writes the synthetic / recursive / paraphrased contamination. Pretrained, never
-# fine-tuned: "recursive" is this model run twice (Gen-1 -> Gen-2), not a model
-# trained on its own output as in the collapse spike, so expect it near "synthetic".
+# Writes the Gen-1 text for the synthetic and recursive contamination, and the
+# paraphrased contamination. Pretrained, never fine-tuned itself.
 generator_model: distilgpt2
+
+# "recursive" contamination is the collapse spike's recipe: a model fine-tuned on
+# Gen-1 writes Gen-2, a model fine-tuned on Gen-2 writes Gen-3, and so on. This is
+# the generation the contamination ends at (2 = Gen-2, must be >= 2). Each extra
+# generation costs one more fine-tune per seed. Intermediate checkpoints go to
+# models_dir and are deleted unless keep_models is true.
+recursive_depth: 2
 
 data:
   kept: data/processed/wikitext2_train_kept.jsonl

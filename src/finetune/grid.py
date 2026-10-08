@@ -19,13 +19,16 @@ How a cell is built, so the only difference between cells is the contamination:
   is the clean data (identical to the spike's Gen-0 data for that seed); the
   second is the *source* the contamination is made from. A contaminated sample
   therefore never shares text with a clean one in the same mixture.
-- ``synthetic`` is the model continuing a source text, ``recursive`` is the
-  same model continuing that synthetic output (Gen-2), ``paraphrased`` is the
-  model rewriting the source, and ``benchmark_near`` is surface-perturbed copies
-  of eval-benchmark items. Every generation here comes from the pretrained
-  ``generator_model``; unlike the collapse spike, no model is fine-tuned on
-  Gen-1 before it writes Gen-2. So ``recursive`` is two sampling passes, not
-  training on its own output, and it may look close to ``synthetic``.
+- ``synthetic`` is the pretrained ``generator_model`` continuing a source text
+  (Gen-1), ``paraphrased`` is that model rewriting the source, and
+  ``benchmark_near`` is surface-perturbed copies of eval-benchmark items.
+- ``recursive`` is the collapse spike's recipe: a model is fine-tuned on Gen-1
+  (the ``synthetic`` pool) and that fine-tuned model writes Gen-2, then a model
+  is fine-tuned on Gen-2 to write Gen-3, and so on up to ``recursive_depth``.
+  Each fine-tune starts from ``base_model`` with the grid's ``train`` settings.
+  Only the last generation is the contamination; the intermediate checkpoints
+  are deleted unless ``keep_models`` is set. This costs ``recursive_depth - 1``
+  extra fine-tunes per seed on top of the cells.
 - At ratio 0 the training set is all human whatever the type, so one model per
   seed serves every type (``share_baseline``). That is 12 of the 60 cells; set
   it to false to train them all separately.
@@ -67,8 +70,8 @@ CONTAMINATION_TYPES: tuple[str, ...] = ("synthetic", "recursive", "paraphrased",
 # generated contamination) is only reusable while these are unchanged; the axes
 # (seeds, ratios, types) are left out so a finished grid can be extended.
 _FINGERPRINT_KEYS = (
-    "base_model", "generator_model", "data", "benchmark_near", "train", "generate",
-    "share_baseline",
+    "base_model", "generator_model", "recursive_depth", "data", "benchmark_near", "train",
+    "generate", "share_baseline",
 )
 
 
@@ -125,6 +128,39 @@ def resample_empty(generate: Generate, tries: int = 5) -> Generate:
         return outs
 
     return wrapped
+
+
+def make_recursive(
+    gen1: Sequence[Sample],
+    *,
+    depth: int,
+    train: Callable[[list[str], int], Any],
+    generator_for: Callable[[Any], Generate],
+    release: Callable[[Any], None] = lambda model: None,
+) -> list[Sample]:
+    """Gen-``depth`` contamination, each generation written by a model trained on the last.
+
+    ``gen1`` is already model-written (the ``synthetic`` pool, from the pretrained
+    generator). Each further step fine-tunes ``train(texts, g)`` on the data so far
+    and has that model continue it with ``make_synthetic``, so the final samples
+    are ``source="recursive"`` with ``generation == depth``. This is the loop of
+    ``collapse.run_generations`` without its last step: that one also trains and
+    scores a model on the final generation and returns only metrics, which here
+    would cost an unused fine-tune per seed and still not return the data.
+    """
+    if depth < 2:
+        raise ValueError(f"depth must be >= 2 (depth 1 is the synthetic pool), got {depth}")
+    wrong = {s.generation for s in gen1} - {1}
+    if wrong:
+        raise ValueError(f"gen1 must be generation-1 samples, found generation(s) {sorted(wrong)}")
+    data = list(gen1)
+    for g in range(1, depth):
+        model = train([training_text(s) for s in data], g)
+        try:
+            data = make_synthetic(data, generator_for(model))
+        finally:
+            release(model)
+    return data
 
 
 def config_fingerprint(cfg: Mapping[str, Any]) -> str:
@@ -361,6 +397,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     cells = make_cells(cfg["types"], cfg["ratios"], cfg["seeds"])
     if 0 not in cfg["ratios"]:
         raise ValueError("ratios must include 0.0: every degradation is measured against it")
+    if not isinstance(cfg["recursive_depth"], int) or cfg["recursive_depth"] < 2:
+        raise ValueError(
+            f"recursive_depth must be an integer >= 2, got {cfg['recursive_depth']!r}"
+        )
     fingerprint = config_fingerprint(cfg)
     out = Path(cfg["output_dir"])
     results_path = out / "results.jsonl"
@@ -428,16 +468,31 @@ def _train_all(
         source = _pick([s for s in kept if s.response not in used], d["n_train"], lo, hi, rng)
         return human, source
 
+    def release(model_dir: Path) -> None:
+        # ponytail: 60 merged DistilGPT-2 checkpoints are ~20 GB. Keep them
+        # (keep_models) only if the white-box signals need them later.
+        if not cfg["keep_models"]:
+            shutil.rmtree(model_dir, ignore_errors=True)
+
     def pool_for(kind: str, seed: int) -> list[Sample]:
         path = pools_dir / f"{kind}_s{seed}.jsonl"
         if path.exists():
             return load_dataset(path)
         print(f"  generating {kind} contamination for seed {seed}", flush=True)
 
-        def generator():  # fresh per pool, so each pool is reproducible on its own
+        def generator(model: str):  # fresh per use, so each pool is reproducible on its own
             return hf_generator(
-                cfg["generator_model"], max_new_tokens=g["max_new_tokens"],
+                model, max_new_tokens=g["max_new_tokens"],
                 batch_size=g["batch_size"], seed=seed, device=cfg["device"],
+            )
+
+        def fine_tune(texts: list[str], gen: int) -> Path:
+            # the spike's recipe and seeds: from base_model, seed * 100 + generation
+            print(f"  recursive gen {gen}: fine-tuning on {len(texts)} texts", flush=True)
+            return train_lora(
+                texts, models_dir / f"pool_recursive_s{seed}_gen{gen}",
+                base_model=cfg["base_model"], seed=seed * 100 + gen,
+                device=cfg["device"], **t,
             )
 
         if kind == "benchmark_near":
@@ -446,11 +501,16 @@ def _train_all(
                 exact_fraction=cfg["benchmark_near"]["exact_fraction"], seed=seed,
             )
         elif kind == "recursive":
-            pool = make_synthetic(pool_for("synthetic", seed), generator())
+            pool = make_recursive(
+                pool_for("synthetic", seed), depth=cfg["recursive_depth"], train=fine_tune,
+                generator_for=lambda ckpt: generator(str(ckpt)), release=release,
+            )
         elif kind == "synthetic":
-            pool = make_synthetic(draw(seed)[1], generator())
+            pool = make_synthetic(draw(seed)[1], generator(cfg["generator_model"]))
         else:
-            pool = make_paraphrased(draw(seed)[1], resample_empty(generator()))
+            pool = make_paraphrased(
+                draw(seed)[1], resample_empty(generator(cfg["generator_model"]))
+            )
         write_jsonl(pool, path)
         return pool
 
@@ -472,18 +532,12 @@ def _train_all(
               flush=True)
         return scores
 
-    def release(model_dir: Path) -> None:
-        # ponytail: 60 merged DistilGPT-2 checkpoints are ~20 GB. Keep them
-        # (keep_models) only if the white-box signals need them later.
-        if not cfg["keep_models"]:
-            shutil.rmtree(model_dir, ignore_errors=True)
-
     def track(cell: Cell) -> AbstractContextManager[Run]:
         params = {
             "type": cell.type, "ratio": cell.ratio, "seed": cell.seed,
             "base_model": cfg["base_model"], "generator_model": cfg["generator_model"],
             "n_train": d["n_train"], "n_holdout": d["n_holdout"], "n_benchmark": d["n_benchmark"],
-            "share_baseline": cfg["share_baseline"], **t,
+            "share_baseline": cfg["share_baseline"], "recursive_depth": cfg["recursive_depth"], **t,
         }
         return track_run(cfg.get("tracking"), cell.id, params,
                          {"kind": "grid", "type": cell.type, "config": fingerprint})

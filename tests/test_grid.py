@@ -1,5 +1,6 @@
 """Tests for the fine-tuning grid, using stub models (no torch)."""
 
+import inspect
 import json
 import random
 import sys
@@ -11,6 +12,8 @@ import pytest
 import yaml
 
 import src.finetune.grid as grid
+from src.finetune.lora import train_lora as real_train_lora
+from src.generation.model_based import hf_generator as real_hf_generator
 from src.evaluation.tracking import Run
 from src.finetune.grid import (
     CONTAMINATION_TYPES,
@@ -229,6 +232,7 @@ def test_fingerprint_tracks_result_defining_settings_only():
     assert config_fingerprint({**cfg, "seeds": [7], "device": "cpu", "output_dir": "x"}) == base
     assert config_fingerprint({**cfg, "train": {**cfg["train"], "lr": 1e-3}}) != base
     assert config_fingerprint({**cfg, "generator_model": "gpt2"}) != base
+    assert config_fingerprint({**cfg, "recursive_depth": cfg["recursive_depth"] + 1}) != base
 
 
 def _rows(spec):
@@ -307,7 +311,7 @@ def test_shipped_configs_describe_the_expected_grid(name, cells):
     cfg = yaml.safe_load((REPO / f"configs/{name}.yaml").read_text())
     assert len(make_cells(cfg["types"], cfg["ratios"], cfg["seeds"])) == cells
     # every key main() reads must exist
-    for key in ("base_model", "generator_model", "device", "share_baseline", "keep_models",
+    for key in ("base_model", "generator_model", "recursive_depth", "device", "share_baseline", "keep_models",
                 "pools_dir", "models_dir", "output_dir", "figure", "gate_min_ppl_increase"):
         assert key in cfg, key
     assert set(cfg["data"]) >= {"kept", "holdout", "benchmark", "n_train", "n_holdout",
@@ -315,6 +319,7 @@ def test_shipped_configs_describe_the_expected_grid(name, cells):
     assert set(cfg["train"]) == {"epochs", "lr", "batch_size", "max_len", "lora_r"}  # train_lora kwargs
     assert set(cfg["generate"]) == {"max_new_tokens", "batch_size"}
     assert cfg["benchmark_near"]["exact_fraction"] <= 1
+    assert isinstance(cfg["recursive_depth"], int) and cfg["recursive_depth"] >= 2
     # the smoke run must never write over the real grid's results or figure
     if name == "grid_smoke":
         real = yaml.safe_load((REPO / "configs/grid.yaml").read_text())
@@ -327,8 +332,11 @@ def _words(prefix, i):
     return " ".join(f"{prefix}{i}w{j}" for j in range(30))
 
 
-def _setup(tmp_path, monkeypatch, seeds=(0, 1)):
-    """A tiny corpus, a smoke-sized config, and stubbed models. Returns (config path, cfg, spies)."""
+def _setup(tmp_path, monkeypatch, seeds=(0, 1), **overrides):
+    """A tiny corpus, a smoke-sized config, and stubbed models. Returns (config path, cfg, spies).
+
+    ``overrides`` replace top-level config keys (types, ratios, recursive_depth, keep_models...).
+    """
     # a fake `transformers` so main() runs without the real one installed
     utils = types.ModuleType("transformers.utils")
     utils.logging = types.SimpleNamespace(set_verbosity_error=lambda: None)
@@ -349,6 +357,7 @@ def _setup(tmp_path, monkeypatch, seeds=(0, 1)):
         output_dir=str(tmp_path / "out"), figure=str(tmp_path / "out/curves.png"),
         tracking={"backend": "none"},
     )
+    cfg.update(overrides)
     cfg["data"].update(
         kept=str(data / "kept.jsonl"), holdout=str(data / "holdout.jsonl"),
         benchmark=str(data / "validation.jsonl"), n_train=10, n_holdout=8, n_benchmark=8,
@@ -356,11 +365,16 @@ def _setup(tmp_path, monkeypatch, seeds=(0, 1)):
     config = tmp_path / "grid.yaml"
     config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
 
-    spies = types.SimpleNamespace(trained=[], generated=[], plots=[])
+    spies = types.SimpleNamespace(
+        trained=[], generated=[], generators=[], generator_kwargs=[], plots=[], kwargs={}
+    )
 
     def fake_train_lora(texts, out_dir, **kw):
+        inspect.signature(real_train_lora).bind(texts, out_dir, **kw)  # a real call would raise
         spies.trained.append((Path(out_dir).name, list(texts), kw["seed"]))
+        spies.kwargs[Path(out_dir).name] = kw
         Path(out_dir).mkdir(parents=True)
+        (Path(out_dir) / "config.json").write_text("{}")  # what loading a checkpoint needs
         return Path(out_dir)
 
     def fake_perplexity(model_dir, texts, **kw):
@@ -369,9 +383,20 @@ def _setup(tmp_path, monkeypatch, seeds=(0, 1)):
         return 50.0 + 20 * ratio + (7.0 if texts[0].startswith("validation") else 0.0)
 
     def fake_generator(model, **kw):
+        inspect.signature(real_hf_generator).bind(model, **kw)  # a real call would raise
+        # the output names the model that wrote it, so a test can tell base from fine-tuned
+        name = Path(model).name
+        fine_tuned = model != cfg["generator_model"]
+        spies.generators.append(name)
+        spies.generator_kwargs.append(kw)
+        if fine_tuned:  # the real pipeline loads the checkpoint, so it must still be there
+            assert (Path(model) / "config.json").exists(), f"checkpoint {model} was already deleted"
+
         def generate(texts):
+            if fine_tuned:
+                assert (Path(model) / "config.json").exists(), f"checkpoint {model} was deleted"
             spies.generated.append(list(texts))
-            return ["generated words here"] * len(texts)
+            return [f"generated by {name}"] * len(texts)
 
         return generate
 
@@ -390,12 +415,13 @@ def test_main_end_to_end_with_stubbed_models(tmp_path, monkeypatch):
     assert grid.main(["--config", str(config)]) == 0
 
     # per seed: ratio 0 once (shared by both types) + ratio 1 per type
-    names = sorted(name for name, _, _ in spy.trained)
+    cells = [(name, ts, seed) for name, ts, seed in spy.trained if not name.startswith("pool_")]
+    names = sorted(name for name, _, _ in cells)
     assert names == sorted(
         f"{t}_r{r}_s{s}" for s in (0, 1) for t, r in (("synthetic", 0), ("synthetic", 1), ("recursive", 1))
     )
-    assert {name: seed for name, _, seed in spy.trained} == {n: int(n[-1]) * 100 for n in names}
-    texts = {name: ts for name, ts, _ in spy.trained}
+    assert {name: seed for name, _, seed in cells} == {n: int(n[-1]) * 100 for n in names}
+    texts = {name: ts for name, ts, _ in cells}
     assert not any("generated" in t for t in texts["synthetic_r0_s0"])
     assert all("generated" in t for t in texts["synthetic_r1_s1"])
     assert all(len(ts) == 10 for ts in texts.values())
@@ -488,4 +514,194 @@ def test_main_requires_a_zero_ratio(tmp_path, monkeypatch):
     cfg["ratios"] = [0.5, 1.0]
     config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     with pytest.raises(ValueError, match="0.0"):
+        grid.main(["--config", str(config)])
+
+
+def _gen1(n=3):
+    return [
+        Sample(sample_id=f"s{i}-g1", response=f"human{i} " * 4 + "gen1", source="synthetic", generation=1)
+        for i in range(n)
+    ]
+
+
+def test_make_recursive_fine_tunes_between_generations():
+    events, released = [], []
+
+    def train(texts, g):
+        events.append(("train", g, list(texts)))
+        return f"model{g}"
+
+    def generator_for(model):
+        events.append(("generator", model))
+        return lambda texts: [f"<{model}>"] * len(texts)
+
+    def release(model):
+        events.append(("release", model))
+        released.append(model)
+
+    out = grid.make_recursive(
+        _gen1(), depth=3, train=train, generator_for=generator_for, release=release
+    )
+
+    # train on Gen-1, write Gen-2 with that model, train on Gen-2, write Gen-3 with that model;
+    # a checkpoint is only deleted once the model it holds has been used
+    assert [e[:2] for e in events] == [
+        ("train", 1), ("generator", "model1"), ("release", "model1"),
+        ("train", 2), ("generator", "model2"), ("release", "model2"),
+    ]
+    assert all("gen1" in t for t in events[0][2])
+    assert all("<model1>" in t for t in events[3][2])
+    assert len(out) == 3
+    assert {(s.source, s.generation) for s in out} == {("recursive", 3)}
+    assert all("<model2>" in s.response and "<model1>" not in s.response for s in out)
+    assert released == ["model1", "model2"]
+
+
+def test_make_recursive_releases_the_model_even_if_generation_fails():
+    released = []
+
+    def broken(model):
+        raise RuntimeError("out of memory")
+
+    with pytest.raises(RuntimeError):
+        grid.make_recursive(
+            _gen1(), depth=2, train=lambda texts, g: "m", generator_for=broken,
+            release=released.append,
+        )
+    assert released == ["m"]
+
+
+@pytest.mark.parametrize("depth", [0, 1])
+def test_make_recursive_needs_at_least_two_generations(depth):
+    with pytest.raises(ValueError, match="depth"):
+        grid.make_recursive(_gen1(), depth=depth, train=lambda t, g: g, generator_for=lambda m: None)
+
+
+def test_make_recursive_wants_generation_one_input():
+    human = [Sample(sample_id="h", response="human text " * 5)]  # generation 0
+    with pytest.raises(ValueError, match="generation-1"):
+        grid.make_recursive(human, depth=2, train=lambda t, g: g, generator_for=lambda m: None)
+
+
+def _recursive_run(tmp_path, monkeypatch, depth, seeds=(1,), **overrides):
+    config, cfg, spy = _setup(
+        tmp_path, monkeypatch, seeds=seeds, types=["recursive"], ratios=[0.0, 1.0],
+        recursive_depth=depth, device="cuda-sentinel", **overrides,
+    )
+    assert grid.main(["--config", str(config)]) == 0
+    return config, cfg, spy
+
+
+@pytest.mark.parametrize("seed", [0, 2])
+@pytest.mark.parametrize("depth", [2, 3])
+def test_the_recursive_pool_is_written_by_models_fine_tuned_on_the_previous_generation(
+    tmp_path, monkeypatch, depth, seed
+):
+    _, cfg, spy = _recursive_run(tmp_path, monkeypatch, depth, seeds=(seed,))
+    ckpt = [f"pool_recursive_s{seed}_gen{g}" for g in range(1, depth)]
+
+    # one fine-tune per extra generation, seeded from the grid seed the way the spike seeds generations
+    tuned = [(name, texts, sd) for name, texts, sd in spy.trained if name.startswith("pool_")]
+    assert [name for name, _, _ in tuned] == ckpt
+    assert [sd for _, _, sd in tuned] == [seed * 100 + g for g in range(1, depth)]
+    assert len(tuned[0][1]) == 10
+    assert all("generated by distilgpt2" in t for t in tuned[0][1])  # Gen-1: the pretrained generator
+    for (_, texts, _), previous in zip(tuned[1:], ckpt):
+        assert all(f"generated by {previous}" in t for t in texts)  # trained on the last generation
+
+    # Gen-1 comes from the pretrained generator, every later step from the fine-tuned checkpoint
+    assert spy.generators == ["distilgpt2", *ckpt]
+    # both are built the way every other pool's generator is: grid seed, device and generate settings
+    expected = {**cfg["generate"], "seed": seed, "device": "cuda-sentinel"}
+    assert all(kw == expected for kw in spy.generator_kwargs)
+
+    pool = load_dataset(tmp_path / "pools" / grid.config_fingerprint(cfg) / f"recursive_s{seed}.jsonl")
+    assert len(pool) == 10
+    assert {(s.source, s.generation) for s in pool} == {("recursive", depth)}
+    assert all(s.response.endswith(f"generated by {ckpt[-1]}") for s in pool)  # the last step
+    assert not any("distilgpt2" in s.response for s in pool)  # not the pretrained model
+
+    # the contaminated cell trains on exactly that pool
+    cell = next(texts for name, texts, _ in spy.trained if name == f"recursive_r1_s{seed}")
+    assert sorted(cell) == sorted(s.response for s in pool)
+
+    assert not list((tmp_path / "models").iterdir())  # intermediate checkpoints are deleted too
+
+
+def test_the_final_generation_is_written_by_the_fine_tuned_model_not_the_base_one(
+    tmp_path, monkeypatch
+):
+    _, cfg, spy = _recursive_run(tmp_path, monkeypatch, depth=2)
+
+    assert spy.generators[-1] == "pool_recursive_s1_gen1"  # the checkpoint, not cfg["generator_model"]
+    assert spy.generators[-1] != cfg["generator_model"]
+    pool = load_dataset(tmp_path / "pools" / grid.config_fingerprint(cfg) / "recursive_s1.jsonl")
+    assert {s.generation for s in pool} == {cfg["recursive_depth"]}
+    assert all(s.response.endswith("generated by pool_recursive_s1_gen1") for s in pool)
+
+
+def test_the_intermediate_fine_tune_uses_the_grids_base_model_and_train_settings(
+    tmp_path, monkeypatch
+):
+    # distinct names, so base_model and generator_model cannot be confused
+    _, cfg, spy = _recursive_run(
+        tmp_path, monkeypatch, depth=2, base_model="base-x", generator_model="gen-y"
+    )
+
+    kw = spy.kwargs["pool_recursive_s1_gen1"]
+    assert kw["base_model"] == "base-x"  # like the spike: every generation starts from the base model
+    assert {k: kw[k] for k in cfg["train"]} == cfg["train"]
+    assert kw["device"] == "cuda-sentinel"  # the grid's device, not a hardcoded one
+    assert spy.generators[0] == "gen-y"  # Gen-1 is written by the pretrained generator model
+
+
+def test_keep_models_also_keeps_the_intermediate_checkpoints(tmp_path, monkeypatch):
+    _recursive_run(tmp_path, monkeypatch, depth=3, keep_models=True)
+    assert sorted(p.name for p in (tmp_path / "models").iterdir()) == [
+        "pool_recursive_s1_gen1", "pool_recursive_s1_gen2", "recursive_r0_s1", "recursive_r1_s1"
+    ]
+
+
+def test_the_recursive_pool_is_built_once_per_seed(tmp_path, monkeypatch):
+    config, _, spy = _recursive_run(tmp_path, monkeypatch, depth=2)
+    (tmp_path / "out/results.jsonl").unlink()  # retrain the cells, keep the cached pools
+    spy.trained.clear()
+    generators = len(spy.generators)
+
+    assert grid.main(["--config", str(config)]) == 0
+
+    assert sorted(name for name, _, _ in spy.trained) == ["recursive_r0_s1", "recursive_r1_s1"]
+    assert len(spy.generators) == generators  # nothing regenerated, no intermediate fine-tune
+
+
+def test_the_synthetic_arm_still_uses_only_the_pretrained_generator(tmp_path, monkeypatch):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,), types=["synthetic"], ratios=[0.0, 1.0])
+    assert grid.main(["--config", str(config)]) == 0
+    assert spy.generators == ["distilgpt2"]
+    assert not [name for name, _, _ in spy.trained if name.startswith("pool_")]
+
+
+@pytest.mark.parametrize(
+    "kind, generators", [("paraphrased", ["gen-y"]), ("benchmark_near", [])]
+)
+def test_the_other_contamination_pools_are_built_and_cached(tmp_path, monkeypatch, kind, generators):
+    config, cfg, spy = _setup(
+        tmp_path, monkeypatch, seeds=(0,), types=[kind], ratios=[0.0, 1.0],
+        base_model="base-x", generator_model="gen-y",
+    )
+    assert grid.main(["--config", str(config)]) == 0
+
+    # only paraphrasing uses a model, and it is the pretrained generator, not the base model
+    assert spy.generators == generators
+    pool = load_dataset(tmp_path / "pools" / grid.config_fingerprint(cfg) / f"{kind}_s0.jsonl")
+    assert len(pool) == 10 and {s.source for s in pool} == {kind}
+    cell = next(texts for name, texts, _ in spy.trained if name == f"{kind}_r1_s0")
+    assert sorted(cell) == sorted(s.response for s in pool)
+    assert not [name for name, _, _ in spy.trained if name.startswith("pool_")]
+
+
+@pytest.mark.parametrize("depth", [1, 0, 2.5, None])
+def test_main_rejects_a_bad_recursive_depth(tmp_path, monkeypatch, depth):
+    config, cfg, _ = _setup(tmp_path, monkeypatch, recursive_depth=depth)
+    with pytest.raises(ValueError, match="recursive_depth"):
         grid.main(["--config", str(config)])
