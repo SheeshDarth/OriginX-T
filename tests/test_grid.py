@@ -367,6 +367,44 @@ def test_monotone_tolerance_boundary_is_inclusive():
     assert run(199, tolerance=0.0)["status"] == "fails"  # zero tolerance: any drop fails
 
 
+def test_the_tolerance_edge_survives_float_rounding():
+    # mathematically a drop of exactly 0.5%, but 100.7 -> 100.1965 computes as 0.005000000000000024
+    assert (100.7 - 100.1965) / 100.7 > 0.005
+    curve = {0.0: [50], 0.25: [100.7], 0.5: [100.1965], 0.75: [150], 1.0: [200]}
+    gate = {**GATE, "collapse_types": ["synthetic"]}
+    assert _gate(_grid({"synthetic": curve}), gate, seeds=[0])["types"]["synthetic"]["status"] == "degrades"
+
+
+def test_the_dose_response_uses_the_mean_across_seeds():
+    # at 0.5 two seeds are high and one collapsed: the mean (110) is an 8.3% drop from 120, the median
+    # (125) is not a drop at all
+    curve = {0.0: [100] * 3, 0.25: [120] * 3, 0.5: [125, 125, 80], 0.75: [130] * 3, 1.0: [140] * 3}
+    t = _gate(_grid({k: curve for k in GATE["collapse_types"]}))["types"]["synthetic"]
+
+    assert t["failed_conditions"] == ["dose_response"]
+    step = next(st for st in t["dose_response"]["steps"] if not st["ok"])
+    assert (step["mean_from"], step["mean_to"]) == (120, 110)
+    assert step["relative_drop"] == pytest.approx(1 / 12)
+
+
+@pytest.mark.parametrize(
+    "low, verdict, failing_seed",
+    [(0.25, "degrades", None), (0.5, "fails", 1), (1.0, "fails", 2)],
+)
+def test_the_noise_check_is_made_at_the_configured_low_dose(low, verdict, failing_seed):
+    # seed 1 is no higher than its baseline at 0.5, and seed 2 at 1.0; everything else is far above it,
+    # and the means rise throughout, so only the choice of low dose decides the verdict
+    curve = {0.0: [100] * 3, 0.25: [110] * 3, 0.5: [220, 100, 220], 0.75: [250] * 3, 1.0: [400, 400, 100]}
+    gate = {**GATE, "collapse_types": ["synthetic"], "low_dose_ratio": low}
+    t = _gate(_grid({"synthetic": curve}), gate)["types"]["synthetic"]
+
+    assert t["status"] == verdict and t["dose_response"]["ok"]
+    assert t["above_noise"]["ratio"] == low
+    assert [p["seed"] for p in t["above_noise"]["seeds"] if not p["ok"]] == (
+        [] if failing_seed is None else [failing_seed]
+    )
+
+
 def test_a_flat_curve_is_non_decreasing():
     curve = {0.0: [100], 0.25: [150], 0.5: [150], 0.75: [150], 1.0: [150]}
     gate = {**GATE, "collapse_types": ["synthetic"]}
@@ -455,10 +493,20 @@ def test_benchmark_near_is_reported_but_never_gated():
     text = grid.format_gate(out)
     assert "benchmark_near (reported, not gated)" in text and "-24.00" in text and "memorised" in text
 
-    # and a missing benchmark_near cell does not stop the gate from being evaluated
-    fewer = [r for r in rows if not (r["type"] == "benchmark_near" and r["ratio"] == 1.0)]
-    assert grid.summarize(fewer, seeds=SEEDS, ratios=RATIOS, gate=GATE)["gate_2_status"] == "passed"
+    # a complete grid, with benchmark_near counted among the configured types, is evaluable
+    every = list(CONTAMINATION_TYPES)
+    assert grid.summarize(rows, seeds=SEEDS, ratios=RATIOS, gate=GATE, types=every)["gate_2_status"] == "passed"
     assert grid.summarize(_all_good(), seeds=SEEDS, ratios=RATIOS, gate=GATE)["benchmark_near"] == []
+
+    # but a partial grid is never a pass, even when only the ungated type is missing cells
+    fewer = [r for r in rows if not (r["type"] == "benchmark_near" and r["ratio"] == 1.0)]
+    out = grid.summarize(fewer, seeds=SEEDS, ratios=RATIOS, gate=GATE, types=every)
+    assert out["gate_2_status"] == "not_evaluable" and not out["gate_2_passed"]
+    assert out["gate"]["missing_cells"] == ["benchmark_near_r1_s0", "benchmark_near_r1_s1", "benchmark_near_r1_s2"]
+    assert {k: t["status"] for k, t in out["gate"]["types"].items()} == {  # the gated types are still judged
+        "synthetic": "degrades", "recursive": "degrades", "paraphrased": "degrades"
+    }
+    assert "3 configured cell(s) have no result yet" in grid.format_gate(out)
 
 
 def test_a_failed_gate_explains_itself():
@@ -1054,3 +1102,37 @@ def test_main_rejects_the_old_gate_setting_and_a_missing_gate(tmp_path, monkeypa
     config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     with pytest.raises(ValueError, match="gate:"):
         grid.main(["--config", str(config)])
+
+
+def test_a_missing_benchmark_near_cell_makes_the_gate_not_evaluable(tmp_path, monkeypatch, capsys):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, types=["synthetic", "recursive", "benchmark_near"])
+    assert grid.main(["--config", str(config)]) == 0
+    assert json.loads((tmp_path / "out/summary.json").read_text())["gate_2_status"] == "passed"
+
+    results = tmp_path / "out/results.jsonl"
+    kept = [line for line in results.read_text().splitlines() if '"benchmark_near_r1_s1"' not in line]
+    assert len(kept) == 11  # 12 cells, one removed
+    results.write_text("\n".join(kept) + "\n")
+    capsys.readouterr()
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["gate_2_status"] == "not_evaluable" and not summary["gate_2_passed"]
+    assert summary["gate"]["missing_cells"] == ["benchmark_near_r1_s1"]
+    assert "GATE 2 NOT EVALUABLE" in capsys.readouterr().out
+
+
+def test_the_gate_uses_the_configured_ratios_not_the_ratios_that_have_rows(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_grid(tmp_path, monkeypatch)
+    assert json.loads((tmp_path / "out/summary.json").read_text())["gate_2_status"] == "passed"
+
+    # the config grows a ratio that has not been run: the old rows do not cover it
+    cfg["ratios"] = [0.0, 0.5, 1.0]
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    spy.trained.clear()
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["gate_2_status"] == "not_evaluable"
+    assert summary["gate"]["types"]["synthetic"]["missing_cells"] == ["synthetic_r0.5_s0", "synthetic_r0.5_s1"]
+    assert spy.trained == []

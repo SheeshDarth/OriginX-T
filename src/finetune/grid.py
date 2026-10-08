@@ -304,6 +304,7 @@ def evaluate_gate(
     seeds: Sequence[int],
     ratios: Sequence[float],
     gate: Mapping[str, Any],
+    types: Optional[Sequence[str]] = None,
 ) -> dict[str, Any]:
     """GATE 2: does every collapse type degrade the model, on a pre-registered rule?
 
@@ -317,10 +318,12 @@ def evaluate_gate(
       of the ratio-0 baselines across seeds.
 
     The gate passes when every type in ``collapse_types`` degrades. It cannot be
-    evaluated, and so never passes, while any cell it needs (every configured
-    ratio and seed of each collapse type) has no result. Each type carries the
-    numbers behind its verdict, so a failure says which condition failed and by
-    how much.
+    evaluated, and so never passes, while the grid is partial: any cell of the
+    configured ``types`` (every ratio and seed; default just the collapse types)
+    with no result makes the status ``not_evaluable``, even when the missing cell
+    is of a type that is not gated. Each gated type still carries the numbers
+    behind its own verdict, so a failure says which condition failed and by how
+    much.
     """
     ratios, seeds = sorted(ratios), list(seeds)
     if 0 not in ratios:
@@ -328,11 +331,11 @@ def evaluate_gate(
     low, tolerance = gate["low_dose_ratio"], gate["monotone_tolerance"]
     ppl = {(r["type"], r["ratio"], r["seed"]): r["holdout_ppl"] for r in rows}
 
-    types: dict[str, dict[str, Any]] = {}
+    verdicts: dict[str, dict[str, Any]] = {}
     for kind in gate["collapse_types"]:
         missing = [Cell(kind, r, s).id for s in seeds for r in ratios if (kind, r, s) not in ppl]
         if missing:
-            types[kind] = {"status": "not_evaluable", "missing_cells": missing}
+            verdicts[kind] = {"status": "not_evaluable", "missing_cells": missing}
             continue
 
         mean = {r: sum(ppl[(kind, r, s)] for s in seeds) / len(seeds) for r in ratios}
@@ -356,7 +359,7 @@ def evaluate_gate(
         dose_ok = all(st["ok"] for st in steps)
         noise_ok = all(p["ok"] for p in per_seed)
         failed = [name for name, ok in (("dose_response", dose_ok), ("above_noise", noise_ok)) if not ok]
-        types[kind] = {
+        verdicts[kind] = {
             "status": "fails" if failed else "degrades",
             "failed_conditions": failed,
             "missing_cells": [],
@@ -365,13 +368,17 @@ def evaluate_gate(
             "above_noise": {"ok": noise_ok, "ratio": low, "spread": spread, "seeds": per_seed},
         }
 
-    statuses = {t["status"] for t in types.values()}
+    required = list(gate["collapse_types"] if types is None else types)
+    missing_cells = [
+        Cell(kind, r, s).id for s in seeds for r in ratios for kind in required if (kind, r, s) not in ppl
+    ]
+    statuses = {t["status"] for t in verdicts.values()}
     status = (
-        "not_evaluable" if "not_evaluable" in statuses
+        "not_evaluable" if missing_cells or "not_evaluable" in statuses
         else "passed" if statuses == {"degrades"}
         else "failed"
     )
-    return {"rule": dict(gate), "status": status, "types": types}
+    return {"rule": dict(gate), "status": status, "missing_cells": missing_cells, "types": verdicts}
 
 
 def benchmark_report(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -401,6 +408,7 @@ def summarize(
     seeds: Sequence[int],
     ratios: Sequence[float],
     gate: Mapping[str, Any],
+    types: Optional[Sequence[str]] = None,
 ) -> dict[str, Any]:
     """Collapse curves per (type, ratio), the GATE 2 verdict, and the benchmark_near report.
 
@@ -424,7 +432,7 @@ def summarize(
             "benchmark_ppl_mean": sum(bench) / len(bench), "benchmark_ppl_min": min(bench),
             "benchmark_ppl_max": max(bench),
         })
-    verdict = evaluate_gate(rows, seeds=seeds, ratios=ratios, gate=gate)
+    verdict = evaluate_gate(rows, seeds=seeds, ratios=ratios, gate=gate, types=types)
     return {
         "curves": curves,
         "gate": verdict,
@@ -437,8 +445,10 @@ def summarize(
 def format_gate(summary: Mapping[str, Any]) -> str:
     """The GATE 2 verdict and, for each type, why, for the run log."""
     gate = summary["gate"]
-    label = {"passed": "PASSED", "failed": "NOT PASSED", "not_evaluable": "NOT EVALUABLE (cells missing)"}
+    label = {"passed": "PASSED", "failed": "NOT PASSED", "not_evaluable": "NOT EVALUABLE (grid is partial)"}
     lines = [f"GATE 2 {label[gate['status']]}"]
+    if gate["missing_cells"]:
+        lines.append(f"  {len(gate['missing_cells'])} configured cell(s) have no result yet")
     for kind, t in gate["types"].items():
         if t["status"] == "not_evaluable":
             lines.append(f"  {kind}: not evaluable, {len(t['missing_cells'])} cell(s) missing")
@@ -586,7 +596,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     if missing:
         print(f"WARNING: {len(missing)} of {len(cells)} cells have no result yet; curves are partial.")
 
-    summary = summarize(rows, seeds=cfg["seeds"], ratios=cfg["ratios"], gate=cfg["gate"])
+    summary = summarize(
+        rows, seeds=cfg["seeds"], ratios=cfg["ratios"], gate=cfg["gate"], types=cfg["types"]
+    )
     summary["complete"] = not missing
     summary["missing_cells"] = missing
     out.mkdir(parents=True, exist_ok=True)
