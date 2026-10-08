@@ -1,6 +1,7 @@
 """Tests for the fine-tuning grid, using stub models (no torch)."""
 
 import json
+import random
 import sys
 import types
 from contextlib import contextmanager
@@ -18,10 +19,12 @@ from src.finetune.grid import (
     format_table,
     load_results,
     make_cells,
+    resample_empty,
     run_grid,
     summarize,
 )
-from src.ingestion.loaders import write_jsonl
+from src.finetune.collapse import _pick
+from src.ingestion.loaders import load_dataset, write_jsonl
 from src.ingestion.schema import Sample
 
 N = 8
@@ -130,6 +133,22 @@ def test_ratio_zero_trains_once_per_seed_and_is_shared_across_types():
     assert len(h.pools) == 4 * 2
 
 
+def test_the_mixture_depends_on_the_seed_but_not_on_the_contamination_type():
+    h = Harness()
+    h.run(make_cells(["synthetic", "recursive"], [0.5], [0, 1]))
+    clean = {
+        (cell.type, cell.seed): {t for t in texts if t.startswith("human")}
+        for cell, texts in h.trained
+    }
+
+    # same seed: both types keep the same human half, so only the contamination differs
+    assert clean[("synthetic", 0)] == clean[("recursive", 0)]
+    assert clean[("synthetic", 1)] == clean[("recursive", 1)]
+    assert len(clean[("synthetic", 0)]) == N // 2
+    # different seed: a different draw
+    assert clean[("synthetic", 0)] != clean[("synthetic", 1)]
+
+
 def test_share_baseline_off_trains_every_cell():
     h = Harness()
     h.run(make_cells(CONTAMINATION_TYPES, [0.0, 1.0], [0]), share_baseline=False)
@@ -177,6 +196,23 @@ def test_a_failed_evaluation_still_releases_the_model():
     assert len(h.released) == 1
 
 
+def test_resample_empty_regenerates_only_the_empty_outputs():
+    calls = []
+
+    def generate(texts):
+        calls.append(list(texts))
+        # "b" comes back empty the first time and fine the second
+        return [("" if t == "b" and len(calls) == 1 else f"out-{t}") for t in texts]
+
+    assert resample_empty(generate)(["a", "b", "c"]) == ["out-a", "out-b", "out-c"]
+    assert calls == [["a", "b", "c"], ["b"]]
+
+
+def test_resample_empty_gives_up_loudly():
+    with pytest.raises(ValueError, match="empty"):
+        resample_empty(lambda texts: ["  "] * len(texts), tries=2)(["a"])
+
+
 def test_load_results_refuses_rows_from_other_settings(tmp_path):
     path = tmp_path / "results.jsonl"
     assert load_results(path, "fp") == {}
@@ -211,7 +247,7 @@ def test_summarize_flags_a_setting_only_if_every_seed_degrades():
         ("recursive", 0.0): [100.0, 100.0],
         ("recursive", 0.5): [99.0, 98.0],
     })
-    out = summarize(rows, 0.05)
+    out = summarize(rows, 0.05, seeds=[0, 1])
 
     assert out["degrading_settings"] == [{"type": "synthetic", "ratio": 0.5}]
     assert out["gate_2_passed"]
@@ -223,17 +259,31 @@ def test_summarize_flags_a_setting_only_if_every_seed_degrades():
 
 
 def test_summarize_does_not_pass_without_a_baseline_or_without_degradation():
-    no_baseline = summarize(_rows({("synthetic", 0.5): [500.0]}), 0.05)
+    no_baseline = summarize(_rows({("synthetic", 0.5): [500.0]}), 0.05, seeds=[0])
     assert not no_baseline["gate_2_passed"]
 
-    flat = summarize(_rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [101.0]}), 0.05)
+    flat = summarize(
+        _rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [101.0]}), 0.05, seeds=[0]
+    )
     assert not flat["gate_2_passed"] and flat["degrading_settings"] == []
+
+
+def test_a_setting_cannot_pass_on_seeds_that_have_not_finished():
+    # seed 0 degrades clearly; seeds 1 and 2 have not run yet (a cut-short Kaggle session)
+    rows = _rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [150.0]})
+
+    assert not summarize(rows, 0.05, seeds=[0, 1, 2])["gate_2_passed"]
+    assert summarize(rows, 0.05, seeds=[0])["gate_2_passed"]  # but it is fine if only seed 0 is asked for
+
+    # a seed that has its ratio-1 row but no baseline row cannot vouch either
+    half = _rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [150.0, 160.0]})
+    assert not summarize(half, 0.05, seeds=[0, 1])["gate_2_passed"]
 
 
 def test_format_table_lines_up_ratios_and_types():
     out = summarize(_rows({
         ("synthetic", 0.0): [100.0], ("synthetic", 1.0): [150.0], ("recursive", 0.0): [100.0],
-    }), 0.05)
+    }), 0.05, seeds=[0])
     lines = format_table(out["curves"]).splitlines()
     assert lines[0].split() == ["ratio", "synthetic", "recursive"]
     assert lines[2].split() == ["1", "150.00", "-"]
@@ -248,7 +298,7 @@ def test_plot_writes_a_figure(tmp_path):
         for i, k in enumerate(CONTAMINATION_TYPES) for r in (0.0, 0.5, 1.0)
     })
     path = tmp_path / "sub" / "curves.png"
-    _plot(summarize(rows, 0.05)["curves"], 2, path)
+    _plot(summarize(rows, 0.05, seeds=[0, 1])["curves"], 2, path)
     assert path.stat().st_size > 1000
 
 
@@ -277,12 +327,11 @@ def _words(prefix, i):
     return " ".join(f"{prefix}{i}w{j}" for j in range(30))
 
 
-def test_main_end_to_end_with_stubbed_models(tmp_path, monkeypatch):
-    pytest.importorskip("matplotlib")
+def _setup(tmp_path, monkeypatch, seeds=(0, 1)):
+    """A tiny corpus, a smoke-sized config, and stubbed models. Returns (config path, cfg, spies)."""
     # a fake `transformers` so main() runs without the real one installed
-    hf_logging = types.SimpleNamespace(set_verbosity_error=lambda: None)
     utils = types.ModuleType("transformers.utils")
-    utils.logging = hf_logging
+    utils.logging = types.SimpleNamespace(set_verbosity_error=lambda: None)
     monkeypatch.setitem(sys.modules, "transformers", types.ModuleType("transformers"))
     monkeypatch.setitem(sys.modules, "transformers.utils", utils)
 
@@ -295,7 +344,7 @@ def test_main_end_to_end_with_stubbed_models(tmp_path, monkeypatch):
 
     cfg = yaml.safe_load((REPO / "configs/grid_smoke.yaml").read_text())
     cfg.update(
-        ratios=[0.0, 1.0], types=["synthetic", "recursive"], device="cpu",
+        seeds=list(seeds), ratios=[0.0, 1.0], types=["synthetic", "recursive"], device="cpu",
         pools_dir=str(tmp_path / "pools"), models_dir=str(tmp_path / "models"),
         output_dir=str(tmp_path / "out"), figure=str(tmp_path / "out/curves.png"),
         tracking={"backend": "none"},
@@ -307,20 +356,21 @@ def test_main_end_to_end_with_stubbed_models(tmp_path, monkeypatch):
     config = tmp_path / "grid.yaml"
     config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
 
-    trained, generated = [], []
+    spies = types.SimpleNamespace(trained=[], generated=[], plots=[])
 
     def fake_train_lora(texts, out_dir, **kw):
-        trained.append((Path(out_dir).name, list(texts), kw["seed"]))
+        spies.trained.append((Path(out_dir).name, list(texts), kw["seed"]))
         Path(out_dir).mkdir(parents=True)
         return Path(out_dir)
 
     def fake_perplexity(model_dir, texts, **kw):
+        # more contamination, worse model; benchmark items score 7 higher than holdout
         ratio = float(Path(model_dir).name.split("_r")[1].split("_")[0])
-        return 50.0 + 20 * ratio  # more contamination, worse model
+        return 50.0 + 20 * ratio + (7.0 if texts[0].startswith("validation") else 0.0)
 
     def fake_generator(model, **kw):
         def generate(texts):
-            generated.append(list(texts))
+            spies.generated.append(list(texts))
             return ["generated words here"] * len(texts)
 
         return generate
@@ -328,36 +378,114 @@ def test_main_end_to_end_with_stubbed_models(tmp_path, monkeypatch):
     monkeypatch.setattr(grid, "train_lora", fake_train_lora)
     monkeypatch.setattr(grid, "perplexity", fake_perplexity)
     monkeypatch.setattr(grid, "hf_generator", fake_generator)
+    # the figure is checked in test_plot_writes_a_figure; stubbing it here keeps this test
+    # running in CI, which has no matplotlib
+    monkeypatch.setattr(grid, "_plot", lambda curves, n_seeds, path: spies.plots.append((n_seeds, path)))
+    return config, cfg, spies
+
+
+def test_main_end_to_end_with_stubbed_models(tmp_path, monkeypatch):
+    config, cfg, spy = _setup(tmp_path, monkeypatch)
 
     assert grid.main(["--config", str(config)]) == 0
 
-    # ratio 0 once (shared by both types) + ratio 1 per type
-    assert sorted(name for name, _, _ in trained) == ["recursive_r1_s0", "synthetic_r0_s0", "synthetic_r1_s0"]
-    assert all(seed == 0 for _, _, seed in trained)  # seed * 100: the spike's Gen-0 seed
-    texts = {name: ts for name, ts, _ in trained}
+    # per seed: ratio 0 once (shared by both types) + ratio 1 per type
+    names = sorted(name for name, _, _ in spy.trained)
+    assert names == sorted(
+        f"{t}_r{r}_s{s}" for s in (0, 1) for t, r in (("synthetic", 0), ("synthetic", 1), ("recursive", 1))
+    )
+    assert {name: seed for name, _, seed in spy.trained} == {n: int(n[-1]) * 100 for n in names}
+    texts = {name: ts for name, ts, _ in spy.trained}
     assert not any("generated" in t for t in texts["synthetic_r0_s0"])
-    assert all("generated" in t for t in texts["synthetic_r1_s0"])
+    assert all("generated" in t for t in texts["synthetic_r1_s1"])
     assert all(len(ts) == 10 for ts in texts.values())
+
+    # the clean data is the spike's Gen-0 draw for the seed, and differs between seeds
+    rng = random.Random(1)
+    kept = load_dataset(cfg["data"]["kept"])
+    expected = [s.response for s in _pick(kept, 10, 20, 150, rng)]
+    assert sorted(texts["synthetic_r0_s1"]) == sorted(expected)
+    assert set(texts["synthetic_r0_s0"]) != set(texts["synthetic_r0_s1"])
+
     # synthetic continues the source texts; recursive continues that output
-    assert len(generated) == 2 and all(len(g) == 10 for g in generated)
+    assert len(spy.generated) == 2 * 2 and all(len(g) == 10 for g in spy.generated)
     # the clean data and the contaminated source are disjoint: no text is in both
     clean = {t.split()[0] for t in texts["synthetic_r0_s0"]}
-    source = {t.split()[0] for t in generated[0]}
+    source = {t.split()[0] for t in spy.generated[0]}
     assert len(clean) == len(source) == 10 and not clean & source
+
     assert not list((tmp_path / "models").iterdir())  # checkpoints are released
+    rows = [json.loads(line) for line in (tmp_path / "out/results.jsonl").read_text().splitlines()]
+    assert len(rows) == 8
+    for r in rows:  # holdout and benchmark are scored on their own texts, not swapped
+        assert r["holdout_ppl"] == 50.0 + 20 * r["ratio"]
+        assert r["benchmark_ppl"] == r["holdout_ppl"] + 7.0
     summary = json.loads((tmp_path / "out/summary.json").read_text())
-    assert summary["gate_2_passed"]
+    assert summary["gate_2_passed"] and summary["complete"] and summary["missing_cells"] == []
     assert {(d["type"], d["ratio"]) for d in summary["degrading_settings"]} == {
         ("synthetic", 1.0), ("recursive", 1.0)
     }
-    assert (tmp_path / "out/curves.png").exists()
-    assert len((tmp_path / "out/results.jsonl").read_text().splitlines()) == 4
+    assert spy.plots == [(2, Path(cfg["figure"]))]
+
+    # contamination is generated once per (type, seed) and cached under the fingerprint
+    fp = grid.config_fingerprint(cfg)
+    assert sorted(p.name for p in (tmp_path / "pools" / fp).iterdir()) == [
+        "recursive_s0.jsonl", "recursive_s1.jsonl", "synthetic_s0.jsonl", "synthetic_s1.jsonl"
+    ]
+    n_generated = len(spy.generated)
+    (tmp_path / "out/results.jsonl").unlink()
+    spy.trained.clear()
+    assert grid.main(["--config", str(config)]) == 0
+    assert len(spy.trained) == 6 and len(spy.generated) == n_generated  # retrained, not regenerated
 
     # a second run has nothing left to train, and a changed setting is refused
-    trained.clear()
+    spy.trained.clear()
     assert grid.main(["--config", str(config)]) == 0
-    assert trained == []
+    assert spy.trained == []
     cfg["train"]["lr"] = 1.0
     config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     with pytest.raises(ValueError, match="different settings"):
+        grid.main(["--config", str(config)])
+
+
+def test_a_cut_short_run_reports_missing_cells_and_cannot_pass(tmp_path, monkeypatch, capsys):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,))
+    assert grid.main(["--config", str(config)]) == 0  # seed 0 only: complete and passing
+    capsys.readouterr()
+
+    cfg["seeds"] = [0, 1]  # the grid grows a seed that has not run
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    assert grid.main(["--config", str(config), "--report-only"]) == 0
+
+    out = capsys.readouterr().out
+    assert "4 of 8 cells have no result yet" in out
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert not summary["gate_2_passed"] and not summary["complete"]
+    assert summary["missing_cells"] == [
+        "synthetic_r0_s1", "recursive_r0_s1", "synthetic_r1_s1", "recursive_r1_s1"
+    ]
+
+
+def test_results_for_cells_outside_the_config_are_ignored(tmp_path, monkeypatch, capsys):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0, 1))
+    assert grid.main(["--config", str(config)]) == 0
+    capsys.readouterr()
+
+    cfg["seeds"] = [0]  # drop seed 1: its rows stay in results.jsonl
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    spy.trained.clear()
+    assert grid.main(["--config", str(config)]) == 0
+
+    assert spy.trained == []
+    assert "Ignoring 4 result(s)" in capsys.readouterr().out
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert {c["n_seeds"] for c in summary["curves"]} == {1}
+    assert spy.plots[-1][0] == 1
+
+
+def test_main_requires_a_zero_ratio(tmp_path, monkeypatch):
+    config, cfg, _ = _setup(tmp_path, monkeypatch)
+    cfg["ratios"] = [0.5, 1.0]
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    with pytest.raises(ValueError, match="0.0"):
         grid.main(["--config", str(config)])

@@ -20,9 +20,12 @@ How a cell is built, so the only difference between cells is the contamination:
   second is the *source* the contamination is made from. A contaminated sample
   therefore never shares text with a clean one in the same mixture.
 - ``synthetic`` is the model continuing a source text, ``recursive`` is the
-  model continuing that synthetic output (Gen-2), ``paraphrased`` is the model
-  rewriting the source, and ``benchmark_near`` is surface-perturbed copies of
-  eval-benchmark items.
+  same model continuing that synthetic output (Gen-2), ``paraphrased`` is the
+  model rewriting the source, and ``benchmark_near`` is surface-perturbed copies
+  of eval-benchmark items. Every generation here comes from the pretrained
+  ``generator_model``; unlike the collapse spike, no model is fine-tuned on
+  Gen-1 before it writes Gen-2. So ``recursive`` is two sampling passes, not
+  training on its own output, and it may look close to ``synthetic``.
 - At ratio 0 the training set is all human whatever the type, so one model per
   seed serves every type (``share_baseline``). That is 12 of the 60 cells; set
   it to false to train them all separately.
@@ -52,7 +55,7 @@ from ..evaluation.metrics import distinct_n, perplexity
 from ..evaluation.tracking import Run, track_run
 from ..generation.benchmark_near import make_near_duplicates
 from ..generation.mixer import mix
-from ..generation.model_based import hf_generator, make_paraphrased, make_synthetic
+from ..generation.model_based import Generate, hf_generator, make_paraphrased, make_synthetic
 from ..ingestion.loaders import load_dataset, write_jsonl
 from ..ingestion.schema import Sample
 from .collapse import _pick, load_holdout, training_text
@@ -98,6 +101,30 @@ def make_cells(
         if len(set(values)) != len(values):
             raise ValueError(f"duplicate entries in {name}: {list(values)}")
     return [Cell(t, r, s) for s in seeds for r in ratios for t in types]
+
+
+def resample_empty(generate: Generate, tries: int = 5) -> Generate:
+    """Re-ask for outputs that come back empty.
+
+    A sampling model can emit end-of-text first, and an empty paraphrase is not a
+    valid sample: one such output out of a thousand would otherwise kill a
+    multi-hour run, then recur on resume because generation is seeded. Only the
+    empty ones are regenerated; the rest are kept as they are.
+    """
+
+    def wrapped(texts: list[str]) -> list[str]:
+        outs = list(generate(texts))
+        for _ in range(tries):
+            bad = [i for i, o in enumerate(outs) if not o.strip()]
+            if not bad:
+                return outs
+            for i, o in zip(bad, generate([texts[i] for i in bad])):
+                outs[i] = o
+        if any(not o.strip() for o in outs):
+            raise ValueError(f"the model still returned empty text after {tries} retries")
+        return outs
+
+    return wrapped
 
 
 def config_fingerprint(cfg: Mapping[str, Any]) -> str:
@@ -203,13 +230,17 @@ def run_grid(
     return rows
 
 
-def summarize(rows: Sequence[Mapping[str, Any]], min_increase: float) -> dict[str, Any]:
+def summarize(
+    rows: Sequence[Mapping[str, Any]], min_increase: float, *, seeds: Sequence[int]
+) -> dict[str, Any]:
     """Collapse curves per (type, ratio) and the GATE 2 verdict.
 
-    A setting degrades when, on every seed, holdout perplexity is at least
-    ``min_increase`` (relative) above that seed's ratio-0 baseline for the same
-    type. That is GATE 0's rule applied to the grid. A seed with no baseline row
-    yet cannot vouch for a setting, so the setting does not count.
+    A setting degrades when, on every seed in ``seeds``, holdout perplexity is at
+    least ``min_increase`` (relative) above that seed's ratio-0 baseline for the
+    same type. That is GATE 0's rule applied to the grid. ``seeds`` is the
+    configured list, not the seeds that happen to have rows: a seed that has not
+    finished (or has no baseline yet) cannot vouch for a setting, so a run cut
+    short can never pass GATE 2 on the seeds it got through.
     """
     baseline = {(r["type"], r["seed"]): r["holdout_ppl"] for r in rows if r["ratio"] == 0}
     groups: dict[tuple[str, float], list[Mapping[str, Any]]] = {}
@@ -220,9 +251,10 @@ def summarize(rows: Sequence[Mapping[str, Any]], min_increase: float) -> dict[st
     for (kind, ratio), rs in sorted(groups.items()):
         ppl = [r["holdout_ppl"] for r in rs]
         bench = [r["benchmark_ppl"] for r in rs]
+        by_seed = {r["seed"]: r["holdout_ppl"] for r in rs}
         rel = [
-            r["holdout_ppl"] / baseline[(kind, r["seed"])] - 1
-            for r in rs if (kind, r["seed"]) in baseline
+            by_seed[s] / baseline[(kind, s)] - 1
+            for s in seeds if s in by_seed and (kind, s) in baseline
         ]
         curves.append({
             "type": kind, "ratio": ratio, "n_seeds": len(rs),
@@ -231,7 +263,7 @@ def summarize(rows: Sequence[Mapping[str, Any]], min_increase: float) -> dict[st
             "benchmark_ppl_mean": sum(bench) / len(bench), "benchmark_ppl_min": min(bench),
             "benchmark_ppl_max": max(bench),
             "rel_increase": rel,
-            "degrades": ratio > 0 and len(rel) == len(rs) and all(x >= min_increase for x in rel),
+            "degrades": ratio > 0 and len(rel) == len(set(seeds)) and all(x >= min_increase for x in rel),
         })
     degrading = [{"type": c["type"], "ratio": c["ratio"]} for c in curves if c["degrades"]]
     return {
@@ -327,21 +359,32 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     cells = make_cells(cfg["types"], cfg["ratios"], cfg["seeds"])
+    if 0 not in cfg["ratios"]:
+        raise ValueError("ratios must include 0.0: every degradation is measured against it")
     fingerprint = config_fingerprint(cfg)
     out = Path(cfg["output_dir"])
     results_path = out / "results.jsonl"
-    done = load_results(results_path, fingerprint)
+    wanted = {c.id for c in cells}
+    # The fingerprint leaves the axes out so a finished grid can be extended, which
+    # also means the file can hold cells this config no longer asks for. Ignore them.
+    done = {k: v for k, v in load_results(results_path, fingerprint).items() if k in wanted}
 
     if not args.report_only:
         _train_all(cfg, cells, fingerprint, results_path, done)
 
-    rows = list(load_results(results_path, fingerprint).values())
+    results = load_results(results_path, fingerprint)
+    rows = [r for k, r in results.items() if k in wanted]
     if not rows:
-        raise SystemExit(f"no results in {results_path}")
-    if len(rows) < len(cells):
-        print(f"WARNING: {len(rows)} of {len(cells)} cells have results; curves are partial.")
+        raise SystemExit(f"no results for this config's cells in {results_path}")
+    if len(results) > len(rows):
+        print(f"Ignoring {len(results) - len(rows)} result(s) for cells outside this config.")
+    missing = [c.id for c in cells if c.id not in results]
+    if missing:
+        print(f"WARNING: {len(missing)} of {len(cells)} cells have no result yet; curves are partial.")
 
-    summary = summarize(rows, cfg["gate_min_ppl_increase"])
+    summary = summarize(rows, cfg["gate_min_ppl_increase"], seeds=cfg["seeds"])
+    summary["complete"] = not missing
+    summary["missing_cells"] = missing
     out.mkdir(parents=True, exist_ok=True)
     (out / "summary.json").write_text(
         json.dumps({"config": cfg, "fingerprint": fingerprint, **summary}, indent=2),
@@ -407,7 +450,7 @@ def _train_all(
         elif kind == "synthetic":
             pool = make_synthetic(draw(seed)[1], generator())
         else:
-            pool = make_paraphrased(draw(seed)[1], generator())
+            pool = make_paraphrased(draw(seed)[1], resample_empty(generator()))
         write_jsonl(pool, path)
         return pool
 

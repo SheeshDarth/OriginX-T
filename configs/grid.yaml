@@ -22,7 +22,10 @@ share_baseline: true
 
 device: cuda            # "cpu" works for the smoke config only
 base_model: distilgpt2
-generator_model: distilgpt2   # writes the synthetic / recursive / paraphrased contamination
+# Writes the synthetic / recursive / paraphrased contamination. Pretrained, never
+# fine-tuned: "recursive" is this model run twice (Gen-1 -> Gen-2), not a model
+# trained on its own output as in the collapse spike, so expect it near "synthetic".
+generator_model: distilgpt2
 
 data:
   kept: data/processed/wikitext2_train_kept.jsonl
