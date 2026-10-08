@@ -16,16 +16,21 @@ belongs with the synthetic generators.
 scored against a real number rather than a label we invented.
 
 Why the text is never recased as a whole. An earlier version rewrote about half
-of the perturbed copies in full ALL CAPS or all lowercase. That is still the
-same content, and ``similarity()`` rightly scores it 1.0, but GPT-2 tokenizes
-``THE RAILWAY`` and ``the railway`` as completely different tokens from ``The
-railway``: ALL CAPS changes up to 80-87% of a passage's pre-tokens. So the
-"near-duplicate" was not near to the model. In the full Sprint-6 grid (PR #12),
-training on these copies *raised* benchmark-item perplexity by 4.7% at ratio 1
-instead of lowering it, while 100% verbatim copies lowered it by 4.9% (1 epoch)
-and 13.4% (3 epochs): the recasing hid the leak it was meant to simulate, and it
-also caused outsized holdout damage (+8% against +1.2% for verbatim copies).
-Every perturbation here is therefore a surface edit that leaves most tokens as
+of the perturbed copies in full ALL CAPS or all lowercase (a quarter each). That
+is the same content, and ``similarity()`` rightly scores it 1.0, but it is not
+the same text to GPT-2. ALL CAPS shares almost no token with the original
+(``THE RAILWAY`` against ``The railway``): it changes 71-87% of a passage's
+pre-tokens. Lowercasing is milder, 5-20%, since only the capitalised words
+change. So the "near-duplicates" were often not near to the model. The full
+Sprint-6 grid (PR #12, 3 seeds) saw the effect: training on them *raised*
+benchmark-item perplexity by 4.7% at ratio 1 instead of lowering it. One-seed
+(seed 0) checks run outside the grid in that PR, on 100% verbatim copies, lowered
+it by 4.9% (1 epoch) and 13.4% (3 epochs, against a 3-epoch baseline), and the
+grid's holdout damage from these copies was +8% against +1.2% for verbatim ones.
+Those checks compare verbatim with perturbed copies as a whole, so they do not
+separate the recasing from the other edits (the old whitespace padding doubled
+every space); both are fixed here, and a re-run of the benchmark_near cells is
+the test. Every perturbation is now a surface edit that leaves most tokens as
 they were: a flipped first letter or sentence start, a double space after a
 sentence, swapped punctuation.
 """
@@ -52,9 +57,10 @@ def _recase(text: str, rng: random.Random) -> str:
     """Flip the case of the first letter, or of every sentence start. Never the whole text.
 
     A pipeline that lower-cases or capitalises sentence starts changes one token
-    per sentence. Recasing everything would change nearly all of them (see the
-    module docstring), so if an edit would leave a mixed-case text entirely upper
-    or lower case, the text is returned unchanged instead.
+    per sentence. Recasing everything would change far more: about 71-87% of the
+    tokens in ALL CAPS and 5-20% in lowercase (see the module docstring). So if an
+    edit would leave a mixed-case text entirely upper or lower case, the text is
+    returned unchanged instead.
     """
     first = _FIRST_LETTER.search(text)
     if first is None:
@@ -101,8 +107,9 @@ def perturb(text: str, rng: random.Random) -> str:
     """Apply one or two surface edits. Meaning is preserved; the string is not.
 
     The edits are mild by construction. Over 200 seeds, on WikiText-style text the
-    result keeps at least 90% of the original's whitespace-separated words and 86% of
-    its GPT-2 pre-tokens; on punctuation-dense prose (many commas, quotes and
+    result keeps about 90% or more of the original's whitespace-separated words
+    (worst case 89.8%) and about 86% or more of its GPT-2 pre-tokens by difflib
+    ratio (worst case 85.6%); on punctuation-dense prose (many commas, quotes and
     apostrophes, which ``_repunct`` rewrites) the worst case is about 74% of the
     words and 77% of the pre-tokens.
     """

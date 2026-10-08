@@ -35,6 +35,13 @@ contaminated rows (ratio > 0) from results.jsonl, after copying the file to
 rows are kept: they are all human, whatever the type, so the shared baselines do
 not change. It refuses results made under different settings, like resume.
 
+If a re-run is cut short, finish it with the plain command, without the flag: it
+trains the cells that are missing and drops nothing. Giving ``--rerun-types``
+again drops that type's rows once more, including any already redone, and makes
+another backup. A re-run's cells are logged as new MLflow runs next to the old ones
+(the ``pool_version`` parameter tells them apart), and replace the cells' checkpoints
+if ``keep_models`` is on.
+
 Results are appended to ``{output_dir}/results.jsonl`` after every cell, so a
 run cut short by a Kaggle session limit resumes where it stopped. Each cell is
 also logged as an MLflow run (see ``src.evaluation.tracking``).
@@ -828,7 +835,8 @@ def _train_all(
             "type": cell.type, "ratio": cell.ratio, "seed": cell.seed,
             "base_model": cfg["base_model"], "generator_model": cfg["generator_model"],
             "n_train": d["n_train"], "n_holdout": d["n_holdout"], "n_benchmark": d["n_benchmark"],
-            "share_baseline": cfg["share_baseline"], "recursive_depth": cfg["recursive_depth"], **t,
+            "share_baseline": cfg["share_baseline"], "recursive_depth": cfg["recursive_depth"],
+            "pool_version": pool_tag(cell.type) if cell.ratio > 0 else "none", **t,
         }
         return track_run(cfg.get("tracking"), cell.id, params,
                          {"kind": "grid", "type": cell.type, "config": fingerprint})

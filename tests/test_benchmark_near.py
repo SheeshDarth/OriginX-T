@@ -270,6 +270,32 @@ def test_recase_sees_a_sentence_start_after_a_closing_quote_or_bracket():
     }
 
 
+def test_recase_sees_sentence_starts_after_question_and_exclamation_marks():
+    text = "Wow! Really? Yes, Paris."  # "Paris" keeps it mixed-case when every start is flipped
+    assert {_recase(text, random.Random(seed)) for seed in SEEDS} == {
+        "wow! Really? Yes, Paris.", "wow! really? yes, Paris."
+    }
+
+
+def test_recase_works_on_non_ascii_letters():
+    text = "Élan vital in Paris. Ünder the sea. Привет Мир. Да."
+    outs = {_recase(text, random.Random(seed)) for seed in SEEDS}
+    assert outs == {
+        "élan vital in Paris. Ünder the sea. Привет Мир. Да.",
+        "élan vital in Paris. ünder the sea. привет Мир. да.",
+    }
+
+
+def test_repunct_is_the_unchanged_swap_of_each_present_punctuation_kind():
+    # kept as it was: each kind present is swapped for all its occurrences, or not, independently
+    outs = {_repunct("a, b. c!", random.Random(seed)) for seed in SEEDS}
+    assert outs == {
+        f"a{comma} b{stop} c{bang}"
+        for comma in (",", " ,") for stop in (".", " .") for bang in ("!", ".")
+    }
+    assert {_repunct("no marks here", random.Random(seed)) for seed in SEEDS} == {"no marks here"}
+
+
 def test_recase_only_treats_a_letter_after_whitespace_as_a_sentence_start():
     # "a.txt" and "U.S.A" are not sentence ends
     text = "The file a.txt is the U.S.A copy. Then b.py ran."

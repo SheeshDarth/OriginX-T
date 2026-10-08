@@ -1255,6 +1255,13 @@ def _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0, 1), **overrides):
 def test_rerun_types_drops_only_that_types_contaminated_rows_and_trains_just_those_cells(tmp_path, monkeypatch):
     config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch)
     results = tmp_path / "out/results.jsonl"
+    # mark the rows that will be redone with a value no run produces, so "was redone" never depends on
+    # timings (a coarse clock makes two runs' `seconds` equal)
+    rows = [_row(l) for l in _lines(results)]
+    for r in rows:
+        if r["type"] == "benchmark_near" and r["ratio"] > 0:
+            r["benchmark_ppl"] = -1.0
+    results.write_text("".join(json.dumps(r) + "\n" for r in rows))
     original = results.read_bytes()
     original_rows = {_row(l)["cell"]: l for l in _lines(results)}
     assert len(original_rows) == 12
@@ -1285,6 +1292,7 @@ def test_rerun_types_drops_only_that_types_contaminated_rows_and_trains_just_tho
         k: v for k, v in original_rows.items() if not k.startswith("benchmark_near_r1")
     }
     assert {k for k in now if now[k] != original_rows[k]} == {"benchmark_near_r1_s0", "benchmark_near_r1_s1"}
+    assert all(_row(now[k])["benchmark_ppl"] != -1.0 for k in ("benchmark_near_r1_s0", "benchmark_near_r1_s1"))
     assert not (tmp_path / "out/results.jsonl.tmp").exists()
     summary = json.loads((tmp_path / "out/summary.json").read_text())
     assert summary["complete"] and summary["stale_cells"] == []
@@ -1417,3 +1425,71 @@ def test_drop_types_keeps_rows_outside_the_config_and_the_order(tmp_path):
     assert backup.read_text() == "".join(json.dumps(r) + "\n" for r in rows)
     with pytest.raises(ValueError, match="different settings"):
         grid.drop_types(path, "other", ["b"])
+
+
+def test_rows_from_before_pool_versions_flag_only_the_cells_whose_generator_changed():
+    # what the committed results of the full grid look like: no pool_version on any row
+    legacy = [
+        {"cell": f"{t}_r{r:g}_s0", "type": t, "ratio": r, "seed": 0}
+        for t in CONTAMINATION_TYPES for r in (0.0, 0.5, 1.0)
+    ]
+    # only benchmark_near's generator changed; synthetic, recursive and paraphrased are not redone
+    assert grid.stale_cells(legacy) == ["benchmark_near_r0.5_s0", "benchmark_near_r1_s0"]
+
+
+def test_a_bump_marks_legacy_rows_stale_for_the_type_and_whatever_is_built_from_it(monkeypatch):
+    legacy = [
+        {"cell": f"{t}_r1_s0", "type": t, "ratio": 1.0, "seed": 0} for t in CONTAMINATION_TYPES
+    ]
+    monkeypatch.setitem(grid.POOL_VERSIONS, "synthetic", 2)
+    assert grid.stale_cells(legacy) == ["synthetic_r1_s0", "recursive_r1_s0", "benchmark_near_r1_s0"]
+    monkeypatch.setitem(grid.POOL_VERSIONS, "synthetic", 1)
+    monkeypatch.setitem(grid.POOL_VERSIONS, "paraphrased", 2)
+    assert grid.stale_cells(legacy) == ["paraphrased_r1_s0", "benchmark_near_r1_s0"]
+
+
+def test_the_stale_warning_names_every_type_that_needs_a_rerun(tmp_path, monkeypatch, capsys):
+    config, cfg, spy = _setup(
+        tmp_path, monkeypatch, seeds=(0,), types=["synthetic", "paraphrased", "benchmark_near"]
+    )
+    assert grid.main(["--config", str(config)]) == 0
+    results = tmp_path / "out/results.jsonl"
+    rows = [_row(l) for l in _lines(results)]
+    for r in rows:
+        r.pop("pool_version", None)  # as if written before versions existed
+    results.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    monkeypatch.setitem(grid.POOL_VERSIONS, "paraphrased", 2)
+    capsys.readouterr()
+
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    out = capsys.readouterr().out
+    assert "2 cell(s) were made with an older version" in out
+    assert "--rerun-types benchmark_near paraphrased" in out  # sorted, both, and not synthetic
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["stale_cells"] == ["paraphrased_r1_s0", "benchmark_near_r1_s0"]
+
+
+def test_mlflow_params_tell_a_rerun_from_the_original(tmp_path, monkeypatch):
+    seen = {}
+
+    @contextmanager
+    def fake_track_run(cfg, name, params, tags=None):
+        seen[name] = dict(params)
+        yield Run()
+
+    monkeypatch.setattr(grid, "track_run", fake_track_run)
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,), types=["benchmark_near"])
+    assert grid.main(["--config", str(config)]) == 0
+
+    assert seen["benchmark_near_r1_s0"]["pool_version"] == "2"
+    assert seen["benchmark_near_r0_s0"]["pool_version"] == "none"  # all human: no pool
+
+
+def test_rerun_types_needs_at_least_one_type(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0,))
+    original = (tmp_path / "out/results.jsonl").read_bytes()
+    with pytest.raises(SystemExit) as exc:
+        grid.main(["--config", str(config), "--rerun-types"])
+    assert exc.value.code == 2
+    assert (tmp_path / "out/results.jsonl").read_bytes() == original and _backups(tmp_path) == []
