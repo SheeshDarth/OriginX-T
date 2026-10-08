@@ -5,7 +5,7 @@
 > "Predict whether a dataset will damage an LLM — before the fine-tuning damage becomes visible."
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Sprint%200-orange.svg)](docs/PROJECT_REPORT.md)
+[![Status](https://img.shields.io/badge/status-GATE%200%20passed-green.svg)](docs/PROJECT_REPORT.md)
 [![CI](https://github.com/SheeshDarth/OriginX-T/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
 ORIGIN-T is a final-year AIML research project that audits datasets for synthetic,
@@ -105,6 +105,15 @@ pip install -r requirements.txt
 pytest -q                                            # smoke test should pass
 ```
 
+Experiments are config-driven and logged to a local MLflow database
+(`mlruns/`, git-ignored; view with `mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db`):
+
+```bash
+python -m src.finetune.collapse --config configs/collapse_spike.yaml   # GATE 0 spike
+python -m src.finetune.grid --config configs/grid_smoke.yaml           # minutes: dry run of the grid
+python -m src.finetune.grid --config configs/grid.yaml                 # the full grid (resumable)
+```
+
 GPU work (fine-tuning) runs on free Google Colab / Kaggle notebooks — see
 [docs/TRD.md](docs/TRD.md#compute-budget) for the compute plan. A local RTX
 4050 6GB GPU is sufficient for feature extraction and small-model inference.
@@ -125,8 +134,13 @@ status: [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#roadmap).
 
 ## Status
 
-**Sprint 0 — Inception + collapse spike.** See the roadmap for the current
-gate. Weekly updates go to the faculty guide; see the template in
+**GATE 0 passed** ([#8](https://github.com/SheeshDarth/OriginX-T/pull/8)): recursive
+training on a model's own output raises hidden-holdout perplexity on every one of
+3 seeds (mean 56.3 → 67.6 over Gen-0..3). Done so far: the contamination
+generators (synthetic, recursive, paraphrased, benchmark-near), the hidden-holdout
+safeguards, and the Sprint-6 fine-tuning grid runner, which has not been run yet.
+Next: run the 60-cell grid for the collapse curves (GATE 2). See the roadmap for
+the full plan. Weekly updates go to the faculty guide; see the template in
 [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#hod-reporting).
 
 ## License
