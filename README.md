@@ -112,6 +112,7 @@ Experiments are config-driven and logged to a local MLflow database
 python -m src.finetune.collapse --config configs/collapse_spike.yaml   # GATE 0 spike
 python -m src.finetune.grid --config configs/grid_smoke.yaml           # minutes: dry run of the grid
 python -m src.finetune.grid --config configs/grid.yaml                 # the full grid (resumable)
+python -m src.finetune.grid --config configs/grid.yaml --summarize-only   # re-apply GATE 2, redraw the figure; trains nothing
 ```
 
 GPU work (fine-tuning) runs on free Google Colab / Kaggle notebooks — see

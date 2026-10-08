@@ -24,7 +24,6 @@ from src.finetune.grid import (
     make_cells,
     resample_empty,
     run_grid,
-    summarize,
 )
 from src.finetune.collapse import _pick
 from src.ingestion.loaders import load_dataset, write_jsonl
@@ -230,64 +229,336 @@ def test_fingerprint_tracks_result_defining_settings_only():
     base = config_fingerprint(cfg)
 
     assert config_fingerprint({**cfg, "seeds": [7], "device": "cpu", "output_dir": "x"}) == base
+    # the GATE 2 rule and where checkpoints go do not change what a cell measures
+    gate = {**cfg["gate"], "monotone_tolerance": 0.5, "low_dose_ratio": 0.5}
+    assert config_fingerprint({**cfg, "gate": gate, "keep_models": not cfg["keep_models"]}) == base
+    assert config_fingerprint({**cfg, "tracking": {"backend": "none"}, "figure": "elsewhere.png"}) == base
     assert config_fingerprint({**cfg, "train": {**cfg["train"], "lr": 1e-3}}) != base
     assert config_fingerprint({**cfg, "generator_model": "gpt2"}) != base
     assert config_fingerprint({**cfg, "recursive_depth": cfg["recursive_depth"] + 1}) != base
 
 
+SEEDS = [0, 1, 2]
+RATIOS = [0.0, 0.25, 0.5, 0.75, 1.0]
+GATE = {
+    "collapse_types": ["synthetic", "recursive", "paraphrased"],
+    "monotone_tolerance": 0.005,
+    "low_dose_ratio": 0.25,
+}
+# a collapse curve that clearly degrades: baselines 100/101/102 (spread 2), +10 at the low dose
+GOOD = {0.0: [100, 101, 102], 0.25: [110, 111, 112], 0.5: [120, 121, 122],
+        0.75: [130, 131, 132], 1.0: [140, 141, 142]}
+
+
 def _rows(spec):
-    """spec: {(type, ratio): [holdout ppl per seed]}"""
+    """spec: {(type, ratio): [holdout ppl per seed]}. benchmark_ppl is a constant 30."""
     return [
         {"type": k, "ratio": r, "seed": s, "holdout_ppl": ppl, "benchmark_ppl": 30.0}
         for (k, r), ppls in spec.items() for s, ppl in enumerate(ppls)
     ]
 
 
-def test_summarize_flags_a_setting_only_if_every_seed_degrades():
-    rows = _rows({
-        ("synthetic", 0.0): [100.0, 100.0],
-        ("synthetic", 0.5): [110.0, 120.0],        # +10%, +20%: degrades
-        ("synthetic", 1.0): [104.0, 130.0],        # +4% on one seed: does not
-        ("recursive", 0.0): [100.0, 100.0],
-        ("recursive", 0.5): [99.0, 98.0],
-    })
-    out = summarize(rows, 0.05, seeds=[0, 1])
-
-    assert out["degrading_settings"] == [{"type": "synthetic", "ratio": 0.5}]
-    assert out["gate_2_passed"]
-    curve = next(c for c in out["curves"] if (c["type"], c["ratio"]) == ("synthetic", 0.5))
-    assert curve["holdout_ppl_mean"] == 115.0
-    assert (curve["holdout_ppl_min"], curve["holdout_ppl_max"]) == (110.0, 120.0)
-    assert curve["rel_increase"] == pytest.approx([0.10, 0.20])
-    assert not any(c["degrades"] for c in out["curves"] if c["ratio"] == 0)
+def _grid(curves, **bench):
+    """Full-grid rows. curves: {type: {ratio: [ppl per seed]}}; bench: {type: {ratio: [benchmark ppl]}}."""
+    rows = _rows({(k, r): v for k, c in curves.items() for r, v in c.items()})
+    for row in rows:
+        row["benchmark_ppl"] = bench.get(row["type"], {}).get(row["ratio"], [30.0] * 3)[row["seed"]]
+    return rows
 
 
-def test_summarize_does_not_pass_without_a_baseline_or_without_degradation():
-    no_baseline = summarize(_rows({("synthetic", 0.5): [500.0]}), 0.05, seeds=[0])
-    assert not no_baseline["gate_2_passed"]
+def _all_good():
+    return _grid({k: GOOD for k in GATE["collapse_types"]})
 
-    flat = summarize(
-        _rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [101.0]}), 0.05, seeds=[0]
+
+def _gate(rows, gate=GATE, seeds=SEEDS, ratios=RATIOS):
+    return grid.evaluate_gate(rows, seeds=seeds, ratios=ratios, gate=gate)
+
+
+def _with(curve, **changes):
+    """``curve`` with some ratios replaced; the ratio is given as a string key: _with(GOOD, **{"0.5": [...]})."""
+    return {**curve, **{float(k): v for k, v in changes.items()}}
+
+
+def test_a_type_that_meets_both_conditions_degrades_and_the_gate_passes():
+    out = _gate(_all_good())
+
+    assert out["status"] == "passed"
+    t = out["types"]["synthetic"]
+    assert t["status"] == "degrades" and t["failed_conditions"] == []
+    assert t["dose_response"]["ok"] and t["above_noise"]["ok"]
+    assert [m["mean"] for m in t["mean_holdout_ppl"]] == [101.0, 111.0, 121.0, 131.0, 141.0]
+    assert t["above_noise"]["spread"] == 2 and t["above_noise"]["ratio"] == 0.25
+    assert [p["excess"] for p in t["above_noise"]["seeds"]] == [10, 10, 10]
+
+
+def test_the_gate_needs_every_collapse_type_to_degrade():
+    flat = {r: [100, 101, 102] for r in RATIOS}  # no dose-response at all
+    out = _gate(_grid({"synthetic": GOOD, "recursive": GOOD, "paraphrased": flat}))
+
+    assert out["status"] == "failed"
+    assert [k for k, t in out["types"].items() if t["status"] == "degrades"] == ["synthetic", "recursive"]
+    assert out["types"]["paraphrased"]["status"] == "fails"
+
+
+def test_dose_response_failing_alone():
+    # clearly above noise at the low dose, but perplexity falls 2% between 0.5 and 0.75
+    dipped = _with(GOOD, **{"0.75": [118, 119, 120]})
+    t = _gate(_grid({k: dipped for k in GATE["collapse_types"]}))["types"]["synthetic"]
+
+    assert t["status"] == "fails" and t["failed_conditions"] == ["dose_response"]
+    assert t["above_noise"]["ok"]
+    bad = [st for st in t["dose_response"]["steps"] if not st["ok"]]
+    assert [(st["from_ratio"], st["to_ratio"]) for st in bad] == [(0.5, 0.75)]
+    assert bad[0]["mean_from"] == 121.0 and bad[0]["mean_to"] == 119.0
+    assert bad[0]["relative_drop"] == pytest.approx(2 / 121)
+
+
+def test_above_noise_failing_alone():
+    # baselines 100/110/120 (spread 20); seed 1 is only +15 at the low dose. Means still rise steadily.
+    noisy = {0.0: [100, 110, 120], 0.25: [130, 125, 145], 0.5: [150, 150, 160],
+             0.75: [170, 170, 180], 1.0: [190, 190, 200]}
+    t = _gate(_grid({k: noisy for k in GATE["collapse_types"]}))["types"]["synthetic"]
+
+    assert t["status"] == "fails" and t["failed_conditions"] == ["above_noise"]
+    assert t["dose_response"]["ok"]
+    assert t["above_noise"]["spread"] == 20
+    assert [(p["seed"], p["excess"], p["ok"]) for p in t["above_noise"]["seeds"]] == [
+        (0, 30, True), (1, 15, False), (2, 25, True)
+    ]
+
+
+@pytest.mark.parametrize(
+    "ratio, values, step",
+    [
+        ("0.25", [95, 96, 97], (0.0, 0.25)),     # first step: below the baseline
+        ("0.5", [108, 109, 110], (0.25, 0.5)),
+        ("0.75", [118, 119, 120], (0.5, 0.75)),
+        ("1.0", [125, 126, 127], (0.75, 1.0)),   # last step
+    ],
+)
+def test_a_dip_at_any_step_of_the_dose_response_is_caught(ratio, values, step):
+    dipped = _with(GOOD, **{ratio: values})
+    t = _gate(_grid({k: dipped for k in GATE["collapse_types"]}))["types"]["synthetic"]
+
+    bad = [(st["from_ratio"], st["to_ratio"]) for st in t["dose_response"]["steps"] if not st["ok"]]
+    assert bad == [step]
+    assert "dose_response" in t["failed_conditions"] and t["status"] == "fails"
+
+
+def test_both_conditions_can_fail_together():
+    bad = {0.0: [100, 110, 120], 0.25: [105, 110, 125], 0.5: [104, 108, 120],
+           0.75: [103, 107, 119], 1.0: [102, 106, 118]}
+    t = _gate(_grid({k: bad for k in GATE["collapse_types"]}))["types"]["synthetic"]
+    assert t["failed_conditions"] == ["dose_response", "above_noise"]
+
+
+def test_monotone_tolerance_boundary_is_inclusive():
+    # one seed, so the means are exact: 200 -> 199 is a drop of exactly 0.5%
+    def run(dip, tolerance=0.005):
+        curve = {0.0: [100], 0.25: [200], 0.5: [dip], 0.75: [250], 1.0: [300]}
+        gate = {**GATE, "collapse_types": ["synthetic"], "monotone_tolerance": tolerance}
+        return _gate(_grid({"synthetic": curve}, synthetic={}), gate, seeds=[0])["types"]["synthetic"]
+
+    assert run(199)["status"] == "degrades"  # exactly at the tolerance
+    just_over = run(198.9)  # a 0.55% drop
+    assert just_over["failed_conditions"] == ["dose_response"]
+    assert just_over["dose_response"]["steps"][1]["relative_drop"] == pytest.approx(0.0055)
+    assert run(198.9, tolerance=0.01)["status"] == "degrades"  # the tolerance is the config's
+    assert run(199, tolerance=0.0)["status"] == "fails"  # zero tolerance: any drop fails
+
+
+def test_the_tolerance_edge_survives_float_rounding():
+    # mathematically a drop of exactly 0.5%, but 100.7 -> 100.1965 computes as 0.005000000000000024
+    assert (100.7 - 100.1965) / 100.7 > 0.005
+    curve = {0.0: [50], 0.25: [100.7], 0.5: [100.1965], 0.75: [150], 1.0: [200]}
+    gate = {**GATE, "collapse_types": ["synthetic"]}
+    assert _gate(_grid({"synthetic": curve}), gate, seeds=[0])["types"]["synthetic"]["status"] == "degrades"
+
+
+def test_the_dose_response_uses_the_mean_across_seeds():
+    # at 0.5 two seeds are high and one collapsed: the mean (110) is an 8.3% drop from 120, the median
+    # (125) is not a drop at all
+    curve = {0.0: [100] * 3, 0.25: [120] * 3, 0.5: [125, 125, 80], 0.75: [130] * 3, 1.0: [140] * 3}
+    t = _gate(_grid({k: curve for k in GATE["collapse_types"]}))["types"]["synthetic"]
+
+    assert t["failed_conditions"] == ["dose_response"]
+    step = next(st for st in t["dose_response"]["steps"] if not st["ok"])
+    assert (step["mean_from"], step["mean_to"]) == (120, 110)
+    assert step["relative_drop"] == pytest.approx(1 / 12)
+
+
+@pytest.mark.parametrize(
+    "low, verdict, failing_seed",
+    [(0.25, "degrades", None), (0.5, "fails", 1), (1.0, "fails", 2)],
+)
+def test_the_noise_check_is_made_at_the_configured_low_dose(low, verdict, failing_seed):
+    # seed 1 is no higher than its baseline at 0.5, and seed 2 at 1.0; everything else is far above it,
+    # and the means rise throughout, so only the choice of low dose decides the verdict
+    curve = {0.0: [100] * 3, 0.25: [110] * 3, 0.5: [220, 100, 220], 0.75: [250] * 3, 1.0: [400, 400, 100]}
+    gate = {**GATE, "collapse_types": ["synthetic"], "low_dose_ratio": low}
+    t = _gate(_grid({"synthetic": curve}), gate)["types"]["synthetic"]
+
+    assert t["status"] == verdict and t["dose_response"]["ok"]
+    assert t["above_noise"]["ratio"] == low
+    assert [p["seed"] for p in t["above_noise"]["seeds"] if not p["ok"]] == (
+        [] if failing_seed is None else [failing_seed]
     )
-    assert not flat["gate_2_passed"] and flat["degrading_settings"] == []
 
 
-def test_a_setting_cannot_pass_on_seeds_that_have_not_finished():
-    # seed 0 degrades clearly; seeds 1 and 2 have not run yet (a cut-short Kaggle session)
-    rows = _rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [150.0]})
+def test_a_flat_curve_is_non_decreasing():
+    curve = {0.0: [100], 0.25: [150], 0.5: [150], 0.75: [150], 1.0: [150]}
+    gate = {**GATE, "collapse_types": ["synthetic"]}
+    assert _gate(_grid({"synthetic": curve}), gate, seeds=[0])["types"]["synthetic"]["status"] == "degrades"
 
-    assert not summarize(rows, 0.05, seeds=[0, 1, 2])["gate_2_passed"]
-    assert summarize(rows, 0.05, seeds=[0])["gate_2_passed"]  # but it is fine if only seed 0 is asked for
 
-    # a seed that has its ratio-1 row but no baseline row cannot vouch either
-    half = _rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [150.0, 160.0]})
-    assert not summarize(half, 0.05, seeds=[0, 1])["gate_2_passed"]
+def test_the_low_dose_must_beat_the_baseline_spread_strictly():
+    # baselines 100 and 102: spread 2. Seed 0 gains exactly 2, which is not more than the spread.
+    def run(gain0):
+        curve = {0.0: [100, 102], 0.25: [100 + gain0, 112], 0.5: [130, 130], 0.75: [140, 140], 1.0: [150, 150]}
+        gate = {**GATE, "collapse_types": ["synthetic"]}
+        return _gate(_grid({"synthetic": curve}), gate, seeds=[0, 1])["types"]["synthetic"]
+
+    assert run(2)["failed_conditions"] == ["above_noise"]
+    assert run(3)["status"] == "degrades"
+
+
+def test_the_spread_is_max_minus_min_of_the_baselines_and_each_seed_uses_its_own():
+    # baselines 100/120/110: spread 20. Seed 1 sits at 120, so 139 is only +19 over ITS baseline,
+    # even though 139 is well above the mean baseline plus the spread (110 + 20 = 130).
+    base = {0.0: [100, 120, 110]}
+    ok = {**base, 0.25: [125, 141, 135], 0.5: [150, 150, 150], 0.75: [160, 160, 160], 1.0: [170, 170, 170]}
+    bad = {**ok, 0.25: [125, 139, 135]}
+    gate = {**GATE, "collapse_types": ["synthetic"]}
+
+    good = _gate(_grid({"synthetic": ok}), gate)["types"]["synthetic"]["above_noise"]
+    assert good["spread"] == 20 and good["ok"]
+    failing = _gate(_grid({"synthetic": bad}), gate)["types"]["synthetic"]["above_noise"]
+    assert failing["spread"] == 20 and not failing["ok"]
+    assert [(p["seed"], p["baseline"], p["excess"], p["ok"]) for p in failing["seeds"]] == [
+        (0, 100, 25, True), (1, 120, 19, False), (2, 110, 25, True)
+    ]
+
+
+def test_a_single_seed_has_no_spread_so_any_rise_counts():
+    gate = {**GATE, "collapse_types": ["synthetic"]}
+    curve = {0.0: [100], 0.25: [100.5], 0.5: [101], 0.75: [102], 1.0: [103]}
+    t = _gate(_grid({"synthetic": curve}), gate, seeds=[0])["types"]["synthetic"]
+    assert t["above_noise"]["spread"] == 0 and t["status"] == "degrades"
+
+
+def test_a_partial_grid_is_not_evaluable_and_never_passes():
+    rows = _all_good()
+    one_cell = [r for r in rows if not (r["type"] == "paraphrased" and r["ratio"] == 1.0 and r["seed"] == 2)]
+    out = _gate(one_cell)
+
+    assert out["status"] == "not_evaluable"
+    assert out["types"]["paraphrased"]["status"] == "not_evaluable"
+    assert out["types"]["paraphrased"]["missing_cells"] == ["paraphrased_r1_s2"]
+    assert out["types"]["synthetic"]["status"] == "degrades"  # the complete types are still judged
+    assert grid.summarize(one_cell, seeds=SEEDS, ratios=RATIOS, gate=GATE)["gate_2_passed"] is False
+
+    # the #9 check: a configured seed with no results can not be ignored
+    two_seeds = [r for r in rows if r["seed"] != 2]
+    assert _gate(two_seeds)["status"] == "not_evaluable"
+    assert _gate(two_seeds, seeds=[0, 1])["status"] == "passed"  # unless it is not configured
+
+    # missing cells win over a failure elsewhere: it is not evaluable, not "failed"
+    flat = _grid({"synthetic": {r: [100, 101, 102] for r in RATIOS}, "recursive": GOOD})
+    assert _gate(flat)["status"] == "not_evaluable"
+
+    # no baseline row for a seed makes that type not evaluable too
+    no_base = [r for r in rows if not (r["type"] == "recursive" and r["ratio"] == 0 and r["seed"] == 1)]
+    assert _gate(no_base)["types"]["recursive"]["missing_cells"] == ["recursive_r0_s1"]
+
+
+def test_nothing_to_evaluate_is_not_a_pass():
+    assert _gate([])["status"] == "not_evaluable"
+
+
+def test_benchmark_near_is_reported_but_never_gated():
+    # benchmark_near has a flat holdout curve, which would fail the rule if it were gated
+    flat = {r: [100, 101, 102] for r in RATIOS}
+    bench = {0.0: [30, 31, 32], 0.25: [24, 25, 26], 0.5: [18, 19, 20], 0.75: [12, 13, 14], 1.0: [6, 7, 8]}
+    rows = _grid({**{k: GOOD for k in GATE["collapse_types"]}, "benchmark_near": flat},
+                 benchmark_near=bench)
+    out = grid.summarize(rows, seeds=SEEDS, ratios=RATIOS, gate=GATE)
+
+    assert out["gate_2_status"] == "passed" and out["gate_2_passed"]
+    assert "benchmark_near" not in out["gate"]["types"]
+    rep = out["benchmark_near"]
+    assert [b["ratio"] for b in rep] == RATIOS
+    assert [b["benchmark_ppl_mean"] for b in rep] == [31, 25, 19, 13, 7]
+    assert [b["delta_vs_ratio0"] for b in rep] == [0, -6, -12, -18, -24]  # negative: memorisation
+    assert rep[4]["relative_delta"] == pytest.approx(7 / 31 - 1) and rep[0]["n_seeds"] == 3
+    text = grid.format_gate(out)
+    assert "benchmark_near (reported, not gated)" in text and "-24.00" in text and "memorised" in text
+
+    # a complete grid, with benchmark_near counted among the configured types, is evaluable
+    every = list(CONTAMINATION_TYPES)
+    assert grid.summarize(rows, seeds=SEEDS, ratios=RATIOS, gate=GATE, types=every)["gate_2_status"] == "passed"
+    assert grid.summarize(_all_good(), seeds=SEEDS, ratios=RATIOS, gate=GATE)["benchmark_near"] == []
+
+    # but a partial grid is never a pass, even when only the ungated type is missing cells
+    fewer = [r for r in rows if not (r["type"] == "benchmark_near" and r["ratio"] == 1.0)]
+    out = grid.summarize(fewer, seeds=SEEDS, ratios=RATIOS, gate=GATE, types=every)
+    assert out["gate_2_status"] == "not_evaluable" and not out["gate_2_passed"]
+    assert out["gate"]["missing_cells"] == ["benchmark_near_r1_s0", "benchmark_near_r1_s1", "benchmark_near_r1_s2"]
+    assert {k: t["status"] for k, t in out["gate"]["types"].items()} == {  # the gated types are still judged
+        "synthetic": "degrades", "recursive": "degrades", "paraphrased": "degrades"
+    }
+    assert "3 configured cell(s) have no result yet" in grid.format_gate(out)
+
+
+def test_a_failed_gate_explains_itself():
+    dipped = _with(GOOD, **{"0.75": [118, 119, 120]})
+    noisy = {0.0: [100, 110, 120], 0.25: [130, 125, 145], 0.5: [150, 150, 160],
+             0.75: [170, 170, 180], 1.0: [190, 190, 200]}
+    out = grid.summarize(_grid({"synthetic": dipped, "recursive": noisy, "paraphrased": GOOD}),
+                         seeds=SEEDS, ratios=RATIOS, gate=GATE)
+    text = grid.format_gate(out)
+
+    assert text.startswith("GATE 2 NOT PASSED")
+    assert "synthetic: FAILS dose_response" in text and "recursive: FAILS above_noise" in text
+    assert "paraphrased: degrades" in text
+    assert "mean 121.00 at ratio 0.5 -> 119.00 at 0.75 is a 1.65% drop, allowed 0.50%" in text
+    assert "seed 1 is +15.00 over its baseline at ratio 0.25, needs more than the baseline spread 20.00" in text
+    # the same numbers are in the JSON the summary writes
+    json.dumps(out)
+    assert out["gate"]["types"]["synthetic"]["dose_response"]["steps"][2]["relative_drop"] > 0.005
+
+
+def test_the_gate_text_for_the_other_verdicts():
+    assert grid.format_gate(grid.summarize(_all_good(), seeds=SEEDS, ratios=RATIOS, gate=GATE)).startswith(
+        "GATE 2 PASSED")
+    partial = [r for r in _all_good() if r["ratio"] != 1.0]
+    text = grid.format_gate(grid.summarize(partial, seeds=SEEDS, ratios=RATIOS, gate=GATE))
+    assert text.startswith("GATE 2 NOT EVALUABLE") and "3 cell(s) missing" in text
+
+
+@pytest.mark.parametrize(
+    "gate, match",
+    [
+        (None, "gate:"),
+        ({"collapse_types": ["synthetic"], "monotone_tolerance": 0.005}, "low_dose_ratio"),
+        ({**GATE, "collapse_types": []}, "collapse_types"),
+        ({**GATE, "collapse_types": ["nope"]}, "collapse_types"),
+        ({**GATE, "monotone_tolerance": -0.1}, "monotone_tolerance"),
+        ({**GATE, "monotone_tolerance": 1}, "monotone_tolerance"),
+        ({**GATE, "low_dose_ratio": 0.3}, "low_dose_ratio"),
+        ({**GATE, "low_dose_ratio": 0}, "low_dose_ratio"),
+    ],
+)
+def test_validate_gate_rejects_bad_settings(gate, match):
+    with pytest.raises(ValueError, match=match):
+        grid.validate_gate(gate, types=list(CONTAMINATION_TYPES), ratios=RATIOS)
+    grid.validate_gate(GATE, types=list(CONTAMINATION_TYPES), ratios=RATIOS)  # and this one is fine
 
 
 def test_format_table_lines_up_ratios_and_types():
-    out = summarize(_rows({
-        ("synthetic", 0.0): [100.0], ("synthetic", 1.0): [150.0], ("recursive", 0.0): [100.0],
-    }), 0.05, seeds=[0])
+    out = grid.summarize(
+        _rows({("synthetic", 0.0): [100.0], ("synthetic", 1.0): [150.0], ("recursive", 0.0): [100.0]}),
+        seeds=[0], ratios=[0.0, 1.0], gate={**GATE, "collapse_types": ["synthetic"], "low_dose_ratio": 1.0},
+    )
     lines = format_table(out["curves"]).splitlines()
     assert lines[0].split() == ["ratio", "synthetic", "recursive"]
     assert lines[2].split() == ["1", "150.00", "-"]
@@ -302,7 +573,8 @@ def test_plot_writes_a_figure(tmp_path):
         for i, k in enumerate(CONTAMINATION_TYPES) for r in (0.0, 0.5, 1.0)
     })
     path = tmp_path / "sub" / "curves.png"
-    _plot(summarize(rows, 0.05, seeds=[0, 1])["curves"], 2, path)
+    gate = {**GATE, "collapse_types": ["synthetic"], "low_dose_ratio": 0.5}
+    _plot(grid.summarize(rows, seeds=[0, 1], ratios=[0.0, 0.5, 1.0], gate=gate)["curves"], 2, path)
     assert path.stat().st_size > 1000
 
 
@@ -312,14 +584,23 @@ def test_shipped_configs_describe_the_expected_grid(name, cells):
     assert len(make_cells(cfg["types"], cfg["ratios"], cfg["seeds"])) == cells
     # every key main() reads must exist
     for key in ("base_model", "generator_model", "recursive_depth", "device", "share_baseline", "keep_models",
-                "pools_dir", "models_dir", "output_dir", "figure", "gate_min_ppl_increase"):
+                "pools_dir", "models_dir", "output_dir", "figure", "gate"):
         assert key in cfg, key
+    assert "gate_min_ppl_increase" not in cfg  # replaced by the gate: section
+    grid.validate_gate(cfg["gate"], types=cfg["types"], ratios=cfg["ratios"])
+    assert set(cfg["gate"]) == {"collapse_types", "monotone_tolerance", "low_dose_ratio"}
     assert set(cfg["data"]) >= {"kept", "holdout", "benchmark", "n_train", "n_holdout",
                                 "n_benchmark", "min_words", "max_words"}
     assert set(cfg["train"]) == {"epochs", "lr", "batch_size", "max_len", "lora_r"}  # train_lora kwargs
     assert set(cfg["generate"]) == {"max_new_tokens", "batch_size"}
     assert cfg["benchmark_near"]["exact_fraction"] <= 1
     assert isinstance(cfg["recursive_depth"], int) and cfg["recursive_depth"] >= 2
+    if name == "grid":  # pre-registered before the full grid's results were seen
+        assert cfg["gate"] == {
+            "collapse_types": ["synthetic", "recursive", "paraphrased"],
+            "monotone_tolerance": 0.005,
+            "low_dose_ratio": 0.25,
+        }
     # the smoke run must never write over the real grid's results or figure
     if name == "grid_smoke":
         real = yaml.safe_load((REPO / "configs/grid.yaml").read_text())
@@ -358,6 +639,9 @@ def _setup(tmp_path, monkeypatch, seeds=(0, 1), **overrides):
         tracking={"backend": "none"},
     )
     cfg.update(overrides)
+    if "gate" not in overrides:  # the smoke gate is for the smoke grid; fit it to this one
+        gated = [t for t in cfg["types"] if t != "benchmark_near"] or list(cfg["types"])
+        cfg["gate"] = {**cfg["gate"], "collapse_types": gated, "low_dose_ratio": max(cfg["ratios"])}
     cfg["data"].update(
         kept=str(data / "kept.jsonl"), holdout=str(data / "holdout.jsonl"),
         benchmark=str(data / "validation.jsonl"), n_train=10, n_holdout=8, n_benchmark=8,
@@ -447,10 +731,12 @@ def test_main_end_to_end_with_stubbed_models(tmp_path, monkeypatch):
         assert r["holdout_ppl"] == 50.0 + 20 * r["ratio"]
         assert r["benchmark_ppl"] == r["holdout_ppl"] + 7.0
     summary = json.loads((tmp_path / "out/summary.json").read_text())
-    assert summary["gate_2_passed"] and summary["complete"] and summary["missing_cells"] == []
-    assert {(d["type"], d["ratio"]) for d in summary["degrading_settings"]} == {
-        ("synthetic", 1.0), ("recursive", 1.0)
+    assert summary["gate_2_passed"] and summary["gate_2_status"] == "passed"
+    assert summary["complete"] and summary["missing_cells"] == []
+    assert {k: t["status"] for k, t in summary["gate"]["types"].items()} == {
+        "synthetic": "degrades", "recursive": "degrades"
     }
+    assert "degrading_settings" not in summary and "gate_min_ppl_increase" not in summary["config"]
     assert spy.plots == [(2, Path(cfg["figure"]))]
 
     # contamination is generated once per (type, seed) and cached under the fingerprint
@@ -487,6 +773,8 @@ def test_a_cut_short_run_reports_missing_cells_and_cannot_pass(tmp_path, monkeyp
     assert "4 of 8 cells have no result yet" in out
     summary = json.loads((tmp_path / "out/summary.json").read_text())
     assert not summary["gate_2_passed"] and not summary["complete"]
+    assert summary["gate_2_status"] == "not_evaluable"  # not "failed": seed 1 simply has not run
+    assert "GATE 2 NOT EVALUABLE" in out
     assert summary["missing_cells"] == [
         "synthetic_r0_s1", "recursive_r0_s1", "synthetic_r1_s1", "recursive_r1_s1"
     ]
@@ -705,3 +993,146 @@ def test_main_rejects_a_bad_recursive_depth(tmp_path, monkeypatch, depth):
     config, cfg, _ = _setup(tmp_path, monkeypatch, recursive_depth=depth)
     with pytest.raises(ValueError, match="recursive_depth"):
         grid.main(["--config", str(config)])
+
+
+# --- the running grid depends on these: its results.jsonl is stamped with this fingerprint ----------
+
+# The settings that make up a fingerprint, and the fingerprint of configs/grid.yaml, as they were
+# when the full grid was started. If a change makes either assertion fail, results.jsonl files from
+# that run stop loading: change them only on purpose, and never mid-run.
+RUNNING_GRID_FINGERPRINT = "d497f2268060"
+RUNNING_GRID_KEYS = (
+    "base_model", "generator_model", "recursive_depth", "data", "benchmark_near", "train",
+    "generate", "share_baseline",
+)
+
+
+def test_the_shipped_grid_fingerprint_is_unchanged_so_a_running_grids_results_still_load(tmp_path):
+    cfg = yaml.safe_load((REPO / "configs/grid.yaml").read_text())
+
+    assert grid._FINGERPRINT_KEYS == RUNNING_GRID_KEYS
+    assert config_fingerprint(cfg) == RUNNING_GRID_FINGERPRINT
+
+    # a results.jsonl row written under that config still loads, and --summarize-only would accept it
+    path = tmp_path / "results.jsonl"
+    row = {"cell": "synthetic_r0_s0", "type": "synthetic", "ratio": 0.0, "seed": 0, "holdout_ppl": 56.0,
+           "benchmark_ppl": 70.0, "config": RUNNING_GRID_FINGERPRINT}
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    assert load_results(path, config_fingerprint(cfg)) == {"synthetic_r0_s0": row}
+
+
+# --- --summarize-only ------------------------------------------------------------------------------
+
+def _finished_grid(tmp_path, monkeypatch, seeds=(0, 1)):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=seeds)
+    assert grid.main(["--config", str(config)]) == 0
+    return config, cfg, spy
+
+
+@pytest.mark.parametrize("flag", ["--summarize-only", "--report-only"])
+def test_summarize_only_trains_nothing_and_rebuilds_the_report(tmp_path, monkeypatch, capsys, flag):
+    config, cfg, spy = _finished_grid(tmp_path, monkeypatch)
+    results = (tmp_path / "out/results.jsonl").read_bytes()
+    (tmp_path / "out/summary.json").unlink()
+    spy.trained.clear()
+    spy.plots.clear()
+    generators = len(spy.generators)
+    capsys.readouterr()
+
+    def no_training(*a, **kw):
+        raise AssertionError("--summarize-only must not train")
+
+    monkeypatch.setattr(grid, "_train_all", no_training)
+    assert grid.main(["--config", str(config), flag]) == 0
+
+    assert spy.trained == [] and len(spy.generators) == generators  # nothing trained or generated
+    assert (tmp_path / "out/results.jsonl").read_bytes() == results  # results are not touched
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["gate_2_status"] == "passed" and summary["complete"]
+    assert spy.plots == [(2, Path(cfg["figure"]))]
+    out = capsys.readouterr().out
+    assert "Mean hidden-holdout perplexity" in out and "GATE 2 PASSED" in out
+
+
+def test_summarize_only_refuses_results_made_under_different_settings(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_grid(tmp_path, monkeypatch)
+    (tmp_path / "out/summary.json").unlink()
+    spy.trained.clear()
+    spy.plots.clear()
+
+    cfg["train"]["lr"] = 1.0  # a setting that is part of the fingerprint
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    with pytest.raises(ValueError, match="different settings"):
+        grid.main(["--config", str(config), "--summarize-only"])
+
+    assert spy.trained == [] and spy.plots == []
+    assert not (tmp_path / "out/summary.json").exists()  # no report from mismatched results
+
+
+def test_summarize_only_re_applies_a_changed_gate_to_finished_results(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_grid(tmp_path, monkeypatch)
+    spy.trained.clear()
+
+    # the gate and keep_models are not part of the fingerprint, so finished results still load
+    cfg["gate"]["monotone_tolerance"] = 0.02
+    cfg["keep_models"] = True
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    assert spy.trained == []
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["gate"]["rule"]["monotone_tolerance"] == 0.02
+    assert summary["gate"]["types"]["synthetic"]["dose_response"]["tolerance"] == 0.02
+
+
+def test_summarize_only_with_no_results_says_so(tmp_path, monkeypatch):
+    config, _, spy = _setup(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit, match="no results"):
+        grid.main(["--config", str(config), "--summarize-only"])
+    assert spy.trained == []
+
+
+def test_main_rejects_the_old_gate_setting_and_a_missing_gate(tmp_path, monkeypatch):
+    config, cfg, _ = _setup(tmp_path, monkeypatch)
+    config.write_text(yaml.safe_dump({**cfg, "gate_min_ppl_increase": 0.05}), encoding="utf-8")
+    with pytest.raises(ValueError, match="gate_min_ppl_increase"):
+        grid.main(["--config", str(config)])
+
+    del cfg["gate"]
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    with pytest.raises(ValueError, match="gate:"):
+        grid.main(["--config", str(config)])
+
+
+def test_a_missing_benchmark_near_cell_makes_the_gate_not_evaluable(tmp_path, monkeypatch, capsys):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, types=["synthetic", "recursive", "benchmark_near"])
+    assert grid.main(["--config", str(config)]) == 0
+    assert json.loads((tmp_path / "out/summary.json").read_text())["gate_2_status"] == "passed"
+
+    results = tmp_path / "out/results.jsonl"
+    kept = [line for line in results.read_text().splitlines() if '"benchmark_near_r1_s1"' not in line]
+    assert len(kept) == 11  # 12 cells, one removed
+    results.write_text("\n".join(kept) + "\n")
+    capsys.readouterr()
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["gate_2_status"] == "not_evaluable" and not summary["gate_2_passed"]
+    assert summary["gate"]["missing_cells"] == ["benchmark_near_r1_s1"]
+    assert "GATE 2 NOT EVALUABLE" in capsys.readouterr().out
+
+
+def test_the_gate_uses_the_configured_ratios_not_the_ratios_that_have_rows(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_grid(tmp_path, monkeypatch)
+    assert json.loads((tmp_path / "out/summary.json").read_text())["gate_2_status"] == "passed"
+
+    # the config grows a ratio that has not been run: the old rows do not cover it
+    cfg["ratios"] = [0.0, 0.5, 1.0]
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    spy.trained.clear()
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["gate_2_status"] == "not_evaluable"
+    assert summary["gate"]["types"]["synthetic"]["missing_cells"] == ["synthetic_r0.5_s0", "synthetic_r0.5_s1"]
+    assert spy.trained == []

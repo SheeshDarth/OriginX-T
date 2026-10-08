@@ -67,11 +67,25 @@ tracking:
 
 pools_dir: data/processed/grid_pools    # generated contamination, reused on resume; git-ignored
 models_dir: data/models/grid            # git-ignored
-keep_models: false                      # true keeps ~330MB per cell (~17GB); the white-box signals need them
+keep_models: true                       # checkpoints are kept for the white-box signals: ~330MB per cell, ~17GB in all, under models_dir above (put it on a drive with space)
 output_dir: reports/grid                # results.jsonl + summary.json, committed
 figure: reports/figures/collapse_curves.png
 
-# GATE 2 counts a setting as degrading when, on every seed, holdout perplexity is
-# at least this much higher (relative) than that seed's ratio-0 baseline. Same
-# value as GATE 0; pre-register a different one before looking at results.
-gate_min_ppl_increase: 0.05
+# GATE 2, pre-registered: this rule was fixed before the full grid's results were
+# seen, and is computed from results.jsonl alone (`--summarize-only` re-applies it
+# to finished results). Changing it after looking at results needs a note in the
+# report. A collapse type "degrades" when BOTH hold:
+#   (a) dose-response: the mean hidden-holdout perplexity across seeds is
+#       non-decreasing over the ratios, allowing a relative drop of at most
+#       monotone_tolerance between neighbouring ratios;
+#   (b) above noise at low dose: at low_dose_ratio, every seed's holdout perplexity
+#       exceeds that seed's own ratio-0 baseline by more than the spread (max - min)
+#       of the ratio-0 baselines across seeds, in perplexity points.
+# GATE 2 passes when every type in collapse_types degrades. It is "not evaluable",
+# never "passed", while any of their cells (all ratios, all seeds) is missing.
+# benchmark_near is not gated: it is reported as the change in mean benchmark-item
+# perplexity against ratio 0, where a negative change means memorisation.
+gate:
+  collapse_types: [synthetic, recursive, paraphrased]
+  monotone_tolerance: 0.005
+  low_dose_ratio: 0.25
