@@ -25,10 +25,16 @@ from pathlib import Path
 from typing import Any
 
 from ..evaluation.metrics import distinct_n, perplexity
+from ..evaluation.tracking import track_run
 from ..generation.model_based import Generate, hf_generator, make_synthetic
 from ..ingestion.loaders import load_dataset
 from ..ingestion.schema import Sample
 from .lora import train_lora
+
+
+def training_text(s: Sample) -> str:
+    """The string a sample is fine-tuned on (shared by the spike and the grid)."""
+    return f"{s.prompt}\n{s.response}".strip()
 
 
 def run_generations(
@@ -38,26 +44,28 @@ def run_generations(
     train: Callable[[list[str], int], Any],
     generator_for: Callable[[Any], Generate],
     evaluate: Callable[[Any], dict[str, float]],
+    on_row: Callable[[dict[str, float]], None] = lambda row: None,
 ) -> list[dict[str, float]]:
     """Train Gen-0..``generations`` and return one metrics row per generation.
 
     ``train(texts, g)`` returns a model handle, ``generator_for(model)`` turns it
     into a ``generate`` callable, and ``evaluate(model)`` scores it (e.g. holdout
     perplexity). Data diversity is measured here on each generation's training set.
+    ``on_row`` sees each row as soon as it exists, so a long run can be logged live.
     """
     data = list(human)
     rows: list[dict[str, float]] = []
     for g in range(generations + 1):
-        texts = [f"{s.prompt}\n{s.response}".strip() for s in data]
+        texts = [training_text(s) for s in data]
         model = train(texts, g)
-        rows.append(
-            {
-                "generation": g,
-                **evaluate(model),
-                "distinct_1": distinct_n(texts, 1),
-                "distinct_2": distinct_n(texts, 2),
-            }
-        )
+        row = {
+            "generation": g,
+            **evaluate(model),
+            "distinct_1": distinct_n(texts, 1),
+            "distinct_2": distinct_n(texts, 2),
+        }
+        rows.append(row)
+        on_row(row)
         if g < generations:
             data = make_synthetic(data, generator_for(model))
     return rows
@@ -72,6 +80,19 @@ def gate_passes(rows: Sequence[dict[str, float]], min_increase: float) -> bool:
 def _pick(samples: list[Sample], n: int, lo: int, hi: int, rng: random.Random) -> list[Sample]:
     fits = [s for s in samples if lo <= len(s.response.split()) <= hi]
     return rng.sample(fits, min(n, len(fits)))
+
+
+def load_holdout(d: dict[str, Any]) -> list[str]:
+    """The fixed hidden-holdout texts every run is scored against.
+
+    Drawn with a constant seed, so the spike and the grid (and every seed in
+    them) see the same texts and differ only in what they trained on.
+    """
+    picked = _pick(
+        load_dataset(d["holdout"]), d["n_holdout"], d["min_words"], d["max_words"],
+        random.Random("holdout"),
+    )
+    return [s.response for s in picked]
 
 
 def _plot(runs: dict[int, list[dict[str, float]]], path: Path) -> None:
@@ -114,13 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     kept = load_dataset(d["kept"])
     # One fixed holdout for every seed, so seeds differ only in training data
     # and training randomness, never in what they are scored against.
-    holdout = [
-        s.response
-        for s in _pick(
-            load_dataset(d["holdout"]), d["n_holdout"], d["min_words"], d["max_words"],
-            random.Random("holdout"),
-        )
-    ]
+    holdout = load_holdout(d)
 
     def run_seed(seed: int) -> list[dict[str, float]]:
         print(f"seed {seed}", flush=True)
@@ -156,13 +171,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    holdout perplexity {ppl:.2f}", flush=True)
             return {"holdout_ppl": ppl}
 
-        return run_generations(
-            human,
-            generations=cfg["generations"],
-            train=train,
-            generator_for=generator_for,
-            evaluate=evaluate,
-        )
+        params = {
+            "seed": seed, "base_model": cfg["base_model"], "generations": cfg["generations"],
+            "n_train": d["n_train"], "n_holdout": d["n_holdout"], **t,
+        }
+        with track_run(cfg.get("tracking"), f"spike-seed{seed}", params, {"kind": "spike"}) as run:
+            return run_generations(
+                human,
+                generations=cfg["generations"],
+                train=train,
+                generator_for=generator_for,
+                evaluate=evaluate,
+                on_row=lambda row: run.log_metrics(
+                    {k: v for k, v in row.items() if k != "generation"}, step=int(row["generation"])
+                ),
+            )
 
     runs = {seed: run_seed(seed) for seed in cfg["seeds"]}
     per_seed = {seed: gate_passes(rows, cfg["gate_min_ppl_increase"]) for seed, rows in runs.items()}
