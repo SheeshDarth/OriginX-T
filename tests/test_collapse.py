@@ -38,3 +38,20 @@ def test_gate():
     rows = [{"holdout_ppl": 100.0}, {"holdout_ppl": 104.0}]
     assert not gate_passes(rows, 0.05)
     assert gate_passes(rows, 0.03)
+
+
+def test_on_row_sees_each_generation_as_it_finishes():
+    human = [Sample(sample_id=f"h{i}", response=f"word{i} " * 6) for i in range(3)]
+    seen = []
+
+    run_generations(
+        human,
+        generations=2,
+        train=lambda texts, g: g,
+        generator_for=lambda g: lambda texts: ["x"] * len(texts),
+        evaluate=lambda g: {"holdout_ppl": 10.0 + g},
+        on_row=seen.append,
+    )
+
+    assert [r["generation"] for r in seen] == [0, 1, 2]
+    assert {"holdout_ppl", "distinct_1", "distinct_2"} <= set(seen[0])

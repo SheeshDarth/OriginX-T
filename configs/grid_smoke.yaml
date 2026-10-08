@@ -1,0 +1,53 @@
+# Minutes-long dry run of the grid on tiny data, to check the whole path
+# (generation, mixing, training, scoring, logging, report) before the real run.
+#
+#   python -m src.finetune.grid --config configs/grid_smoke.yaml
+#
+# Numbers from this are meaningless. Its output goes to separate directories,
+# so it never mixes with the real grid.
+
+seeds: [0]
+ratios: [0.0, 0.5, 1.0]
+types: [synthetic, recursive, paraphrased, benchmark_near]
+share_baseline: true
+
+device: cuda            # "cpu" also works at this size
+base_model: distilgpt2
+generator_model: distilgpt2
+
+data:
+  kept: data/processed/wikitext2_train_kept.jsonl
+  holdout: data/processed/wikitext2_train_hidden_holdout.jsonl
+  benchmark: data/processed/wikitext2_validation.jsonl
+  n_train: 32
+  n_holdout: 16
+  n_benchmark: 16
+  min_words: 20
+  max_words: 150
+
+benchmark_near:
+  exact_fraction: 0.3
+
+train:
+  epochs: 1
+  lr: 2.0e-4
+  batch_size: 8
+  max_len: 128
+  lora_r: 8
+
+generate:
+  max_new_tokens: 32
+  batch_size: 16
+
+tracking:
+  backend: mlflow
+  uri: sqlite:///mlruns/mlflow.db
+  experiment: origin-t-grid-smoke
+
+pools_dir: data/processed/grid_smoke_pools
+models_dir: data/models/grid_smoke
+keep_models: false
+output_dir: reports/grid_smoke
+figure: reports/grid_smoke/collapse_curves.png
+
+gate_min_ppl_increase: 0.05

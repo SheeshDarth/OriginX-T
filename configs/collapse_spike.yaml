@@ -35,6 +35,11 @@ generate:
   max_new_tokens: 96
   batch_size: 16        # texts per GPU call; lower it if generation runs out of memory
 
+tracking:
+  backend: mlflow                       # "none" to skip logging
+  uri: sqlite:///mlruns/mlflow.db       # local file, git-ignored; view: mlflow ui --backend-store-uri <uri>
+  experiment: origin-t-spike
+
 models_dir: data/models/collapse_spike    # merged checkpoints, git-ignored
 output_dir: reports/collapse_spike        # metrics.json + figure, committed
 
