@@ -138,11 +138,29 @@ status: [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#roadmap).
 
 **GATE 0 passed** ([#8](https://github.com/SheeshDarth/OriginX-T/pull/8)): recursive
 training on a model's own output raises hidden-holdout perplexity on every one of
-3 seeds (mean 56.3 → 67.6 over Gen-0..3). Done so far: the contamination
-generators (synthetic, recursive, paraphrased, benchmark-near), the hidden-holdout
-safeguards, and the Sprint-6 fine-tuning grid runner, which has not been run yet.
-Next: run the 60-cell grid for the collapse curves (GATE 2). See the roadmap for
-the full plan. Weekly updates go to the faculty guide; see the template in
+3 seeds (mean 56.3 → 67.6 over Gen-0..3).
+
+**GATE 2 passed** ([#11](https://github.com/SheeshDarth/OriginX-T/pull/11),
+[#12](https://github.com/SheeshDarth/OriginX-T/pull/12)) on the full 60-cell grid
+(4 contamination types × 5 ratios × 3 seeds, DistilGPT-2 + LoRA on WikiText-2), under
+a dose-response rule fixed before the results were seen
+([TRD §11](docs/TRD.md#11-gono-go-gates)). Hidden-holdout perplexity rises steadily
+with the contamination ratio, from 56.6 at ratio 0 to 67.6 (synthetic), 68.4
+(recursive) and 65.4 (paraphrased) at ratio 1, and is already above seed noise at
+ratio 0.25. Recursive is worst at every ratio.
+
+**Open:** the `benchmark_near` curve in #12 does not show leakage (benchmark-item
+perplexity rose instead of falling) because its generator recased whole texts, which
+GPT-2 sees as different text. The generator is fixed
+([#13](https://github.com/SheeshDarth/OriginX-T/pull/13)) but its cells have not been
+re-run: `python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near`.
+GATE 2 does not depend on it.
+
+Done so far: the contamination generators, the hidden-holdout safeguards, run logging
+(MLflow), and the fine-tuning grid with its results. Not in the repo yet: the feature
+suite (`src/features/`), and with it the risk classifier, conformal prediction and
+survival models that need it (GATE 1 and GATE 3). See the roadmap for the full plan.
+Weekly updates go to the faculty guide; see the template in
 [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#hod-reporting).
 
 ## License
