@@ -226,7 +226,8 @@ def fake_signals(v: float, delta: bool = True) -> dict:
             {"layer": 1, "n_tokens": 100, "effective_rank": v, "participation_ratio": v / 2, "anisotropy": v / 100},
         ],
         "mlp": [{"block": 0, "dead_fraction": 0.0}, {"block": 1, "dead_fraction": v / 1000}],
-        "weights": {k: {"stable_rank": v / 10, "effective_rank": v / 5} for k in wb.WEIGHT_KINDS},
+        "weights": {k: {"stable_rank": v / 10 + i, "effective_rank": v / 5 + i}
+                    for i, k in enumerate(wb.WEIGHT_KINDS)},  # attn_qkv, attn_out, mlp_in, mlp_out
     }
     if delta:
         sig["delta"] = {"rel_norm": v / 1000, "effective_rank": 2.0}
@@ -247,13 +248,14 @@ def grid_rows(types=("synthetic", "benchmark_near"), seeds=(0, 1), ratios=(0.0, 
     return rows
 
 
-def make_models(tmp_path, rows, recursion=()):
+def make_models(tmp_path, rows, recursion=(), weights=False):
+    """Checkpoint directories for every trained cell; with ``weights`` each holds a distinct weights file."""
     models = tmp_path / "models"
-    for r in rows:
-        if not r["shared_baseline"]:
-            (models / r["cell"]).mkdir(parents=True)
-    for name in recursion:
+    names = [r["cell"] for r in rows if not r["shared_baseline"]] + list(recursion)
+    for name in names:
         (models / name).mkdir(parents=True)
+        if weights:
+            (models / name / "model.safetensors").write_bytes(f"weights of {name}".encode() * 50)
     return models
 
 
@@ -425,7 +427,8 @@ def test_headline_scalars():
     assert h["part_ratio_last"] == 20.0 and h["anisotropy_last"] == 0.4
     assert h["anisotropy_mean"] == pytest.approx(0.25)
     assert h["dead_fraction_mean"] == pytest.approx(0.02)
-    assert h["stable_rank_attn"] == 4.0 and h["stable_rank_mlp"] == 4.0
+    assert h["stable_rank_attn"] == 4.0  # the fused QKV matrix (kind 0)
+    assert h["stable_rank_mlp"] == 6.0   # the MLP input matrix (kind 2), not the attention output or MLP output
     assert h["delta_rel_norm"] == 0.04 and h["delta_eff_rank"] == 2.0
     assert "delta_rel_norm" not in wb.headline(fake_signals(40.0, delta=False))
 
@@ -442,7 +445,7 @@ def test_summary_is_per_type_and_ratio_across_seeds_with_recursion_stages_apart(
     def value(name):
         seed = int(name.split("_s")[1][0])
         base = 100.0 if "_r0_" in name else 60.0
-        return base + seed  # seeds 0, 1, 2
+        return base + [0.0, 1.0, 5.0][seed]  # asymmetric on purpose: the mean 62 is not the median 61
     rows = _summary_rows(tmp_path, value)
     summary = wb.summarize(rows)
 
@@ -450,7 +453,7 @@ def test_summary_is_per_type_and_ratio_across_seeds_with_recursion_stages_apart(
     assert set(curves) == {("synthetic", 0.0), ("synthetic", 1.0), ("benchmark_near", 0.0), ("benchmark_near", 1.0)}
     c = curves[("synthetic", 1.0)]
     assert c["n_seeds"] == 3
-    assert c["eff_rank_last"] == {"mean": 61.0, "min": 60.0, "max": 62.0}
+    assert c["eff_rank_last"] == {"mean": 62.0, "min": 60.0, "max": 65.0}
     # the baseline copy of benchmark_near is the synthetic baseline, so the two agree
     assert curves[("benchmark_near", 0.0)]["eff_rank_last"] == curves[("synthetic", 0.0)]["eff_rank_last"]
     assert [(s["generation"], s["n_seeds"]) for s in summary["recursion_stages"]] == [(1, 2)]
@@ -670,12 +673,12 @@ def torch_stack():
     return torch, transformers
 
 
-def tiny_model(torch_stack, seed=0, init_range=0.5):
+def tiny_model(torch_stack, seed=0, init_range=0.5, n_layer=N_LAYER):
     """A random GPT-2 (no download). A large init range keeps the MLP units from being dead by chance."""
     torch, transformers = torch_stack
     torch.manual_seed(seed)
     config = transformers.GPT2Config(
-        vocab_size=50, n_positions=32, n_embd=N_EMBD, n_layer=N_LAYER, n_head=N_HEAD,
+        vocab_size=50, n_positions=32, n_embd=N_EMBD, n_layer=n_layer, n_head=N_HEAD,
         initializer_range=init_range, resid_pdrop=0.0, embd_pdrop=0.0, attn_pdrop=0.0,
     )
     return transformers.GPT2LMHeadModel(config).eval()
@@ -958,3 +961,438 @@ def test_main_can_skip_the_distance_from_the_base(tmp_path, monkeypatch):
     config.write_text(yaml.safe_dump({**cfg, "delta_from_base": False}))
     assert wb.main(["--config", str(config)]) == 0
     assert calls and all(kw["base_model"] is None for _, _, kw in calls)
+
+
+# ===== review follow-ups: shifted accumulation, checkpoint identity, reconciling against the grid ======
+
+def test_a_layer_where_every_token_is_one_vector_is_exactly_degenerate_even_for_awkward_numbers():
+    np = _np()
+    v = np.random.default_rng(0).normal(size=768) * 10  # not a dyadic number: E[xx^T] - mean mean^T would leave residue
+    stats = wb.RepresentationStats(768)
+    for _ in range(10):
+        stats.update(np.tile(v, (2048, 1)))
+    res = stats.result()
+    assert res["degenerate"] and res["effective_rank"] == 0.0 and res["participation_ratio"] == 0.0
+    assert res["anisotropy"] == pytest.approx(1.0)
+
+
+def test_a_huge_common_offset_does_not_blur_the_spectrum():
+    np = _np()
+    rng = np.random.default_rng(1)
+    x = rng.normal(size=(5000, 12)) * np.linspace(0.5, 3.0, 12) + 1e8  # mean 1e8, std 0.5 to 3
+    stats = wb.RepresentationStats(12)
+    for chunk in _chunks(x, [700, 1300, 11]):
+        stats.update(chunk)
+    exact = np.linalg.eigvalsh(np.cov((x - x.mean(axis=0)).T, bias=True))[::-1]
+    assert np.allclose(stats.eigenvalues(), exact, rtol=1e-6)
+    assert stats.result()["effective_rank"] == pytest.approx(wb.effective_rank(np.sqrt(exact)), rel=1e-6)
+
+
+def test_the_first_batch_can_be_empty():
+    np = _np()
+    stats = wb.RepresentationStats(2)
+    stats.update(np.zeros((0, 2)))
+    stats.update(np.array([[1.0, 2.0], [3.0, 5.0], [0.0, 1.0]]))
+    assert stats.n == 3 and stats.result()["effective_rank"] > 1.0
+
+
+def test_delta_effective_rank_is_the_entropy_rank_of_the_update():
+    np = _np()
+    w0 = np.eye(4)
+    _, _, rank = wb.delta_norms(w0 + np.diag([3.0, 1.0, 0.0, 0.0]), w0)
+    assert rank == pytest.approx(math.exp(-(0.75 * math.log(0.75) + 0.25 * math.log(0.25))))
+
+
+# --- checkpoint identity ----------------------------------------------------------------------------
+
+def _ckpt(tmp_path, name="ckpt", content=b"weights" * 100):
+    d = tmp_path / name
+    d.mkdir()
+    (d / "model.safetensors").write_bytes(content)
+    return d
+
+
+def test_checkpoint_identity_and_when_it_still_matches(tmp_path):
+    import os
+    import shutil
+
+    d = _ckpt(tmp_path)
+    ident = wb.checkpoint_identity(d)
+    assert set(ident) == {"size", "mtime_ns", "hash"} and ident["size"] == 700
+    assert wb.same_checkpoint(d, ident)  # untouched
+
+    copy = tmp_path / "copy"  # copied elsewhere: a new mtime, the same content
+    shutil.copytree(d, copy)
+    os.utime(copy / "model.safetensors", ns=(1, 1))
+    assert wb.same_checkpoint(copy, ident)
+
+    changed = _ckpt(tmp_path, "changed", b"WEIGHTS" * 100)  # replaced: same size, other content, other mtime
+    os.utime(changed / "model.safetensors", ns=(5, 5))
+    assert not wb.same_checkpoint(changed, ident)
+
+    longer = _ckpt(tmp_path, "longer", b"weights" * 101)
+    assert not wb.same_checkpoint(longer, ident)
+
+
+def test_nothing_to_compare_is_not_a_difference(tmp_path):
+    d = _ckpt(tmp_path)
+    ident = wb.checkpoint_identity(d)
+    assert wb.same_checkpoint(d, None) and wb.same_checkpoint(d, {})  # a row without an identity
+    assert wb.same_checkpoint(None, ident)  # an item without a checkpoint
+    (tmp_path / "bare").mkdir()
+    assert wb.same_checkpoint(tmp_path / "bare", ident)  # a checkpoint with no weights file here
+    assert wb.checkpoint_identity(tmp_path / "bare") is None
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "pytorch_model.bin").write_bytes(b"x" * 10)
+    assert wb.checkpoint_identity(legacy)["size"] == 10  # the older file name is understood
+
+
+def test_rows_record_the_identity_and_an_overwritten_checkpoint_is_measured_again(tmp_path):
+    import os
+
+    rows = grid_rows(types=("synthetic",), seeds=(0,))
+    models = make_models(tmp_path, rows, recursion=["pool_recursive_s0_gen1"], weights=True)
+    items, _ = wb.plan(rows, models, seeds=[0])
+    first = Spy()
+    done = {r["cell"]: r for r in first.run(items)}
+    assert done["pool_recursive_s0_gen1"]["checkpoint_id"] == wb.checkpoint_identity(models / "pool_recursive_s0_gen1")
+
+    # the recursion intermediate is retrained into the same directory: no grid row can tell
+    weights = models / "pool_recursive_s0_gen1" / "model.safetensors"
+    weights.write_bytes(b"retrained weights" * 50)
+    os.utime(weights, ns=(7, 7))
+    again = Spy()
+    out = {r["cell"]: r for r in again.run(items, done=done)}
+
+    assert again.measured == ["pool_recursive_s0_gen1"]  # and only it
+    assert out["pool_recursive_s0_gen1"]["checkpoint_id"] != done["pool_recursive_s0_gen1"]["checkpoint_id"]
+
+
+def test_a_cell_retrained_to_the_same_holdout_ppl_is_still_noticed(tmp_path):
+    import os
+
+    rows = grid_rows(types=("synthetic",), seeds=(0,))
+    models = make_models(tmp_path, rows, weights=True)
+    items, _ = wb.plan(rows, models, seeds=[0])
+    done = {r["cell"]: r for r in Spy().run(items)}
+
+    weights = models / "synthetic_r1_s0" / "model.safetensors"
+    weights.write_bytes(b"another model" * 50)  # same grid row, different checkpoint
+    os.utime(weights, ns=(9, 9))
+    again = Spy()
+    again.run(items, done=done)
+    assert again.measured == ["synthetic_r1_s0"]
+
+
+def test_a_baseline_copy_listed_before_its_source_is_still_copied(tmp_path):
+    rows = grid_rows(types=("synthetic", "benchmark_near"), seeds=(0,))
+    items, _ = wb.plan(rows, make_models(tmp_path, rows), seeds=[0])
+    reordered = sorted(items, key=lambda i: i["kind"] != "shared_baseline")  # copies first
+    assert reordered[0]["kind"] == "shared_baseline"
+    out = {r["cell"]: r for r in Spy().run(reordered)}
+    assert out["benchmark_near_r0_s0"]["signals"] == out["synthetic_r0_s0"]["signals"]
+
+
+# --- reconciling the rows with the grid as it is now ---------------------------------------------------
+
+def _measured(tmp_path, rows, **kw):
+    models = make_models(tmp_path, rows, **kw)
+    items, _ = wb.plan(rows, models, seeds=[0, 1])
+    return models, {r["cell"]: r for r in Spy().run(items)}
+
+
+def test_reconcile_trusts_rows_without_any_checkpoint_on_disk(tmp_path):
+    rows = grid_rows()
+    _, done = _measured(tmp_path, rows)
+    fresh, stale, missing = wb.reconcile(done, rows, {r["cell"] for r in rows}, tmp_path / "gone", [0, 1])
+    assert len(fresh) == len(rows) and stale == [] and missing == []
+
+
+def test_reconcile_flags_a_rerun_cell_stale_and_a_cell_without_a_row_missing(tmp_path):
+    rows = grid_rows()
+    _, done = _measured(tmp_path, rows)
+    now = [dict(r, holdout_ppl=r["holdout_ppl"] - 3) if r["cell"] == "benchmark_near_r1_s1" else r for r in rows]
+    done.pop("synthetic_r1_s0")
+
+    fresh, stale, missing = wb.reconcile(done, now, {r["cell"] for r in rows}, tmp_path / "models", [0, 1])
+    assert stale == ["benchmark_near_r1_s1"] and missing == ["synthetic_r1_s0"]
+    assert "benchmark_near_r1_s1" not in {r["cell"] for r in fresh} and len(fresh) == len(rows) - 2
+
+
+def test_reconcile_flags_a_replaced_checkpoint_where_it_is_on_disk(tmp_path):
+    import os
+
+    rows = grid_rows()
+    models, done = _measured(tmp_path, rows, recursion=["pool_recursive_s0_gen1"], weights=True)
+    assert wb.reconcile(done, rows, {r["cell"] for r in rows}, models, [0, 1])[1] == []
+    for name in ("synthetic_r1_s0", "pool_recursive_s0_gen1"):
+        f = models / name / "model.safetensors"
+        f.write_bytes(b"replaced" * 70)
+        os.utime(f, ns=(3, 3))
+    _, stale, missing = wb.reconcile(done, rows, {r["cell"] for r in rows}, models, [0, 1])
+    assert stale == ["pool_recursive_s0_gen1", "synthetic_r1_s0"] and missing == []
+
+
+def test_reconcile_ignores_cells_and_stages_outside_the_configured_grid(tmp_path):
+    rows = grid_rows()
+    _, done = _measured(tmp_path, rows, recursion=["pool_recursive_s0_gen1", "pool_recursive_s1_gen1"])
+    seed0 = [r for r in rows if r["seed"] == 0]
+    fresh, stale, missing = wb.reconcile(done, seed0, {r["cell"] for r in seed0}, tmp_path / "models", [0])
+    assert {r["seed"] for r in fresh} == {0} and stale == [] and missing == []
+    assert [r["cell"] for r in fresh if r["kind"] == "recursion_stage"] == ["pool_recursive_s0_gen1"]
+
+
+def test_partial_points_name_the_thin_means():
+    rows = [
+        {"cell": "a", "type": "t", "ratio": 1.0, "seed": 0, "kind": "cell", "headline": {"eff_rank_last": 5.0}},
+        {"cell": "b", "type": "t", "ratio": 1.0, "seed": 1, "kind": "cell", "headline": {"eff_rank_last": 6.0}},
+        {"cell": "c", "type": "t", "ratio": 0.0, "seed": 0, "kind": "cell", "headline": {"eff_rank_last": 9.0}},
+        {"cell": "p", "type": "recursive", "ratio": None, "seed": 0, "kind": "recursion_stage", "generation": 1,
+         "headline": {"eff_rank_last": 4.0}},
+    ]
+    assert wb.partial_points(wb.summarize(rows), 2) == [
+        "t ratio 0: 1 of 2 seeds", "recursion generation 1: 1 of 2 seeds"
+    ]
+    assert wb.partial_points(wb.summarize(rows), 1) == []
+
+
+# --- the command line against the grid as it is now -----------------------------------------------------
+
+def test_a_clone_without_the_checkpoints_can_still_summarize_the_committed_rows(tmp_path, monkeypatch, capsys):
+    import shutil
+    from src.finetune import collapse
+
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    assert wb.main(["--config", str(config)]) == 0
+    shutil.rmtree(tmp_path / "models")  # data/models is git-ignored: a fresh clone has none
+    (tmp_path / "wb/whitebox_summary.json").unlink()
+    monkeypatch.setattr(collapse, "load_holdout", lambda data: pytest.fail("summarising must not load the holdout"))
+    calls.clear()
+    capsys.readouterr()
+
+    assert wb.main(["--config", str(config), "--summarize-only"]) == 0
+
+    summary = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
+    assert summary["complete"] and summary["missing_cells"] == [] and summary["stale_cells"] == []
+    assert len(summary["curves"]) == 4 and calls == []
+    assert "keep_models" not in capsys.readouterr().out  # no checkpoints were looked for
+
+
+def test_a_checkpoint_deleted_after_it_was_measured_does_not_remove_its_row(tmp_path, monkeypatch):
+    import shutil
+    from src.finetune import collapse
+
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    assert wb.main(["--config", str(config)]) == 0
+    full = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
+    shutil.rmtree(tmp_path / "models" / "synthetic_r0_s0")  # freeing space, and the baseline the copies came from
+    shutil.rmtree(tmp_path / "models" / "synthetic_r1_s1")
+    monkeypatch.setattr(collapse, "load_holdout", lambda data: pytest.fail("nothing is left to measure"))
+    calls.clear()
+
+    assert wb.main(["--config", str(config)]) == 0
+
+    after = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
+    assert calls == [] and after["missing_cells"] == [] and after["complete"]
+    assert after["curves"] == full["curves"]  # every point still has all its seeds
+
+
+def test_summarize_only_leaves_out_a_rerun_cell_and_says_so(tmp_path, monkeypatch, capsys):
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    assert wb.main(["--config", str(config)]) == 0
+    full = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
+    results = tmp_path / "grid_out/results.jsonl"  # benchmark_near_r1_s1 re-run: a new holdout ppl
+    lines = []
+    for line in results.read_text().splitlines():
+        row = json.loads(line)
+        if row["cell"] == "benchmark_near_r1_s1":
+            row["holdout_ppl"] = 40.0
+        lines.append(json.dumps(row))
+    results.write_text("\n".join(lines) + "\n")
+    calls.clear()
+    capsys.readouterr()
+
+    assert wb.main(["--config", str(config), "--summarize-only"]) == 0
+
+    out = capsys.readouterr().out
+    summary = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
+    assert calls == []  # summarising never measures
+    assert summary["stale_cells"] == ["benchmark_near_r1_s1"] and not summary["complete"]
+    assert "1 row(s) are out of date" in out and "benchmark_near ratio 1: 1 of 2 seeds" in out
+    thin = next(c for c in summary["curves"] if (c["type"], c["ratio"]) == ("benchmark_near", 1.0))
+    assert thin["n_seeds"] == 1 and thin["eff_rank_last"] != next(
+        c for c in full["curves"] if (c["type"], c["ratio"]) == ("benchmark_near", 1.0))["eff_rank_last"]
+    assert summary["partial_points"] == [  # (the fixture has the recursion intermediate of seed 0 only)
+        "benchmark_near ratio 1: 1 of 2 seeds", "recursion generation 1: 1 of 2 seeds"
+    ]
+
+    # a plain run measures it again, and the summary is whole
+    assert wb.main(["--config", str(config)]) == 0
+    assert [name for name, _, _ in calls] == ["benchmark_near_r1_s1"]
+    assert json.loads((tmp_path / "wb/whitebox_summary.json").read_text())["complete"]
+
+
+def test_cells_outside_the_configured_grid_are_left_out(tmp_path, monkeypatch):
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    assert wb.main(["--config", str(config)]) == 0
+    grid["seeds"] = [0]  # the grid config is narrowed; seed 1's rows stay in both files
+    grid["types"] = ["synthetic"]
+    (tmp_path / "grid.yaml").write_text(yaml.safe_dump(grid))
+    calls.clear()
+
+    assert wb.main(["--config", str(config), "--summarize-only"]) == 0
+
+    summary = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
+    assert {c["type"] for c in summary["curves"]} == {"synthetic"} and {c["n_seeds"] for c in summary["curves"]} == {1}
+    assert summary["partial_points"] == [] and summary["complete"]  # one seed is all this grid has now
+    assert [g["n_seeds"] for g in summary["recursion_stages"]] == [1]  # seed 0's stage only
+
+
+def test_a_configured_cell_with_no_measurement_is_reported_not_hidden(tmp_path, monkeypatch, capsys):
+    import shutil
+
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    shutil.rmtree(tmp_path / "models" / "benchmark_near_r1_s1")  # never measured, and now cannot be
+    capsys.readouterr()
+    assert wb.main(["--config", str(config)]) == 0
+
+    out = capsys.readouterr().out
+    summary = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
+    assert summary["missing_cells"] == ["benchmark_near_r1_s1"] and not summary["complete"]
+    assert "1 configured cell(s) have no measurement" in out
+    assert "NOTE: averaged over fewer seeds" in out and "benchmark_near ratio 1: 1 of 2 seeds" in out
+
+
+def test_a_plain_run_with_nothing_to_measure_does_not_load_the_holdout(tmp_path, monkeypatch, capsys):
+    from src.finetune import collapse
+
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    assert wb.main(["--config", str(config)]) == 0
+    monkeypatch.setattr(collapse, "load_holdout", lambda data: pytest.fail("no holdout needed"))
+    capsys.readouterr()
+    assert wb.main(["--config", str(config)]) == 0
+    assert "0 to do" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change", [{"eps": 0.5}, {"exclude_first_token": False}, {"delta_from_base": False}])
+def test_every_setting_that_changes_the_numbers_makes_old_rows_refused(tmp_path, monkeypatch, change):
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    assert wb.main(["--config", str(config)]) == 0
+    config.write_text(yaml.safe_dump({**cfg, **change}))
+    with pytest.raises(ValueError, match="different settings"):
+        wb.main(["--config", str(config)])
+
+
+def test_the_settings_reach_the_measurement(tmp_path, monkeypatch):
+    config, cfg, grid, calls, plots = _cli_setup(tmp_path, monkeypatch)
+    config.write_text(yaml.safe_dump({**cfg, "eps": 0.3, "exclude_first_token": False}))
+    assert wb.main(["--config", str(config)]) == 0
+    assert calls and all(kw["eps"] == 0.3 and kw["exclude_first_token"] is False for _, _, kw in calls)
+
+
+# --- model-level gaps -----------------------------------------------------------------------------------------
+
+def test_the_excluded_position_is_the_first_one(torch_stack):
+    """The representations used are exactly the non-pad tokens after position 0, layer by layer."""
+    torch, _ = torch_stack
+    np = _np()
+    model = tiny_model(torch_stack)
+    ids, mask = batch_of(torch_stack, [10, 7, 12], seed=11, pad_to=14)
+    with torch.no_grad():
+        hidden = model(input_ids=ids, attention_mask=mask, output_hidden_states=True).hidden_states
+    keep = mask.bool().clone()
+    keep[:, 0] = False
+
+    sig = wb.model_signals(model, [(ids, mask)])
+    for layer, h in enumerate(hidden):
+        stats = wb.RepresentationStats(N_EMBD)
+        stats.update(h[keep].double().numpy())
+        expected = stats.result()
+        for key in ("effective_rank", "participation_ratio", "anisotropy", "n_tokens"):
+            assert sig["layers"][layer][key] == pytest.approx(expected[key], rel=1e-6, abs=1e-9), (layer, key)
+    assert np is not None
+
+
+def test_the_mlp_statistic_also_leaves_out_the_first_position(torch_stack):
+    torch, _ = torch_stack
+    model = tiny_model(torch_stack)
+    with torch.no_grad():  # a unit that can only fire at position 0
+        for p in model.parameters():
+            p.zero_()
+        for ln in [b.ln_1 for b in model.transformer.h] + [b.ln_2 for b in model.transformer.h]:
+            ln.weight.fill_(1.0)
+        model.transformer.ln_f.weight.fill_(1.0)
+        model.transformer.wpe.weight[0, 1] = 100.0  # only position 0 has a non-zero embedding
+        mlp = model.transformer.h[0].mlp
+        mlp.c_fc.weight[1, :] = 1.0  # every unit reads dimension 1
+        mlp.c_fc.bias.fill_(-3.0)
+    batch = batch_of(torch_stack, [10, 9, 11])
+
+    excluded = wb.model_signals(model, [batch], exclude_first_token=True)["mlp"][0]["dead_fraction"]
+    included = wb.model_signals(model, [batch], exclude_first_token=False)["mlp"][0]["dead_fraction"]
+    assert excluded == 1.0  # at every other position the input is -3 and GELU(-3) is about -0.004
+    assert included == 0.0  # position 0 sees 100/std - 3 and every unit fires
+
+
+def test_a_deeper_model_averages_its_blocks_by_mean_not_median(torch_stack):
+    np = _np()
+    model = tiny_model(torch_stack, n_layer=3)
+    weights = wb.block_weights(model)
+    sig = wb.model_signals(model, [batch_of(torch_stack, [10, 11])])
+    per_block = [wb.weight_stats(weights[f"attn_qkv.{i}"])["stable_rank"] for i in range(3)]
+    assert len(set(round(v, 6) for v in per_block)) == 3 and np.mean(per_block) != np.median(per_block)
+    assert sig["weights"]["attn_qkv"]["stable_rank"] == pytest.approx(np.mean(per_block))
+    assert len(sig["layers"]) == 4 and len(sig["mlp"]) == 3
+
+
+def test_each_weight_kind_is_the_matrix_it_says(torch_stack):
+    weights = wb.block_weights(tiny_model(torch_stack))
+    shapes = {kind: weights[f"{kind}.0"].shape for kind in wb.WEIGHT_KINDS}
+    assert shapes == {"attn_qkv": (16, 48), "attn_out": (16, 16), "mlp_in": (16, 64), "mlp_out": (64, 16)}
+
+
+def _tiny_checkpoint(torch_stack, directory, padding_side="right"):
+    pytest.importorskip("tokenizers")
+    from tokenizers import Tokenizer, models, pre_tokenizers
+    from transformers import PreTrainedTokenizerFast
+
+    words = ["<unk>", "<eos>", "the", "cat", "sat", "on", "mat", "dog", "ran", "far", "away", "home"]
+    tk = Tokenizer(models.WordLevel({w: i for i, w in enumerate(words)}, unk_token="<unk>"))
+    tk.pre_tokenizer = pre_tokenizers.Whitespace()
+    fast = PreTrainedTokenizerFast(tokenizer_object=tk, unk_token="<unk>", eos_token="<eos>", padding_side=padding_side)
+    tiny_model(torch_stack).save_pretrained(directory)
+    fast.save_pretrained(directory)
+    return directory
+
+
+def test_texts_longer_than_max_len_are_truncated(torch_stack, tmp_path):
+    ckpt = _tiny_checkpoint(torch_stack, tmp_path / "c")
+    kw = dict(batch_size=2, device="cpu", eps=0.01, exclude_first_token=True, base_model=None)
+    texts = ["the cat sat on the mat the dog ran far away home", "cat dog", "the mat"]  # 12, 2, 2 tokens
+    sig = wb.compute_checkpoint(ckpt, texts, max_len=6, **kw)
+    assert sig["n_tokens"] == (6 - 1) + (2 - 1) + (2 - 1)  # the long text is cut to 6 tokens; position 0 is excluded
+
+
+def test_a_tokenizer_that_pads_on_the_left_is_measured_as_if_it_padded_on_the_right(torch_stack, tmp_path):
+    texts = ["the cat sat on the mat", "cat dog", "the dog ran far away from home", "the mat"]
+    kw = dict(max_len=8, batch_size=4, device="cpu", eps=0.01, exclude_first_token=True, base_model=None)
+    right = wb.compute_checkpoint(_tiny_checkpoint(torch_stack, tmp_path / "r"), texts, **kw)
+    left = wb.compute_checkpoint(_tiny_checkpoint(torch_stack, tmp_path / "l", padding_side="left"), texts, **kw)
+
+    assert left["n_tokens"] == right["n_tokens"]
+    for a, b in zip(left["layers"], right["layers"]):
+        for key in ("effective_rank", "participation_ratio", "anisotropy"):
+            assert a[key] == pytest.approx(b[key], rel=1e-4, abs=1e-6)
+
+
+def test_the_first_token_and_the_threshold_reach_compute_checkpoint(torch_stack, tmp_path):
+    ckpt = _tiny_checkpoint(torch_stack, tmp_path / "c")
+    texts = ["the cat sat on the mat", "the dog ran far away home", "cat dog sat"]
+    kw = dict(max_len=8, batch_size=2, device="cpu", base_model=None)
+    base = wb.compute_checkpoint(ckpt, texts, eps=0.01, exclude_first_token=True, **kw)
+    with_first = wb.compute_checkpoint(ckpt, texts, eps=0.01, exclude_first_token=False, **kw)
+    loose = wb.compute_checkpoint(ckpt, texts, eps=1e9, exclude_first_token=True, **kw)
+    assert with_first["n_tokens"] == base["n_tokens"] + len(texts)
+    assert all(m["dead_fraction"] == 1.0 for m in loose["mlp"])
+    assert any(m["dead_fraction"] < 1.0 for m in base["mlp"])

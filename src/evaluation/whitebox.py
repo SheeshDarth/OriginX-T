@@ -18,8 +18,13 @@ hidden-holdout texts through the model once and reads its weights:
   (``delta_rel_norm = ||W - W0||_F / ||W0||_F``).
 
 GPT-2's first position is an outlier (a huge-norm "attention sink" state). Left in, it
-dominates every covariance and anisotropy figure, so by default it is excluded
-(``exclude_first_token``); it applies to the activations as well as the representations.
+dominates the covariance spectrum (effective rank, participation ratio) of the layers
+before the final LayerNorm: in a simulation with the first token at 30x the others' norm,
+effective rank fell from 64 to 33 and participation ratio from 63 to 1.2. Anisotropy
+works on unit vectors, so the norm cannot dominate it; it moved by under 2%. So by default
+the first position is excluded (``exclude_first_token``), from the activations as well as
+the representations. This assumes right padding, as the GPT-2 tokenizer does by default:
+``compute_checkpoint`` sets it explicitly.
 
     python -m src.evaluation.whitebox --config configs/whitebox.yaml
     python -m src.evaluation.whitebox --config configs/whitebox.yaml --summarize-only
@@ -106,7 +111,10 @@ class RepresentationStats:
     """Spectrum and anisotropy of token representations, accumulated batch by batch.
 
     Only running sums are kept (``n``, ``sum x``, ``sum x x^T``, ``sum x/|x|``), so the
-    token matrix is never stored. Everything is float64.
+    token matrix is never stored. Everything is float64. The covariance sums are taken
+    around the first token seen: eigenvalues do not depend on the origin, and it keeps
+    ``E[xx^T] - mean mean^T`` from cancelling when the representations have a huge common
+    offset, so a layer where every token is one vector has *exactly* zero variance.
     """
 
     def __init__(self, dim: int) -> None:
@@ -114,6 +122,7 @@ class RepresentationStats:
 
         self.dim = dim
         self.n = 0
+        self._shift: Any = None
         self._sum = np.zeros(dim)
         self._outer = np.zeros((dim, dim))
         self._unit_sum = np.zeros(dim)
@@ -126,9 +135,12 @@ class RepresentationStats:
         x = np.asarray(x, dtype=np.float64)
         if x.ndim != 2 or x.shape[1] != self.dim:
             raise ValueError(f"expected shape (n, {self.dim}), got {x.shape}")
+        if self._shift is None and len(x):
+            self._shift = x[0].copy()
         self.n += len(x)
-        self._sum += x.sum(axis=0)
-        self._outer += x.T @ x
+        centred = x - self._shift if len(x) else x
+        self._sum += centred.sum(axis=0)
+        self._outer += centred.T @ centred
         norms = np.linalg.norm(x, axis=1)
         nonzero = norms > 0
         self._unit_sum += (x[nonzero] / norms[nonzero, None]).sum(axis=0)
@@ -374,6 +386,7 @@ def compute_checkpoint(
 
     tok = AutoTokenizer.from_pretrained(checkpoint)
     tok.pad_token = tok.pad_token or tok.eos_token
+    tok.padding_side = "right"  # position 0 must be the first real token (see exclude_first_token)
     model = AutoModelForCausalLM.from_pretrained(checkpoint).to(device).eval()
     batches = []
     for i in range(0, len(texts), batch_size):
@@ -451,15 +464,63 @@ def load_rows(path: str | Path, fingerprint: str) -> dict[str, dict[str, Any]]:
     return rows
 
 
+def _weights_file(checkpoint: str | Path) -> Optional[Path]:
+    for name in ("model.safetensors", "pytorch_model.bin"):
+        path = Path(checkpoint) / name
+        if path.is_file():
+            return path
+    return None
+
+
+def _file_hash(path: Path) -> str:
+    h = hashlib.blake2b(digest_size=8)
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def checkpoint_identity(checkpoint: str | Path) -> Optional[dict[str, Any]]:
+    """Who this checkpoint is: its weights file's size, mtime and content hash (None if it has none)."""
+    path = _weights_file(checkpoint)
+    if path is None:
+        return None
+    stat = path.stat()
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "hash": _file_hash(path)}
+
+
+def same_checkpoint(checkpoint: Optional[str | Path], stored: Optional[Mapping[str, Any]]) -> bool:
+    """Is the checkpoint on disk the one ``stored`` describes?
+
+    Untouched (same size and mtime) is accepted without reading it. If the mtime moved, the
+    content hash decides, so copying the checkpoints to another machine does not make every
+    row look out of date, while a checkpoint that was overwritten does. With nothing to
+    compare (no stored identity, or no weights file) there is nothing to object to.
+    """
+    if checkpoint is None or not stored:
+        return True
+    path = _weights_file(checkpoint)
+    if path is None:
+        return True
+    stat = path.stat()
+    if (stat.st_size, stat.st_mtime_ns) == (stored["size"], stored["mtime_ns"]):
+        return True
+    return stat.st_size == stored["size"] and _file_hash(path) == stored["hash"]
+
+
 def is_current(item: Mapping[str, Any], row: Optional[Mapping[str, Any]]) -> bool:
     """Is ``row`` a measurement of the checkpoint ``item`` describes?
 
-    A grid cell that was re-run has a new checkpoint and a different ``holdout_ppl``, so its
-    old row is out of date. Recursion stages have no grid row, so presence is enough.
+    Two things can make a row out of date. A grid cell that was re-run (``--rerun-types``)
+    has a different ``holdout_ppl``. Any checkpoint that was overwritten (recursion stages
+    have no grid row at all, and a cell can be retrained to the same ``holdout_ppl``) no
+    longer matches the identity recorded when it was measured.
     """
     if row is None:
         return False
-    return row.get("grid_holdout_ppl") == item.get("grid_holdout_ppl")
+    if row.get("grid_holdout_ppl") != item.get("grid_holdout_ppl"):
+        return False
+    return same_checkpoint(item.get("checkpoint"), row.get("checkpoint_id"))
 
 
 def run_whitebox(
@@ -502,6 +563,7 @@ def run_whitebox(
                 **({"generation": item["generation"]} if "generation" in item else {}),
                 **({"grid_holdout_ppl": item["grid_holdout_ppl"]} if "grid_holdout_ppl" in item else {}),
                 "checkpoint_name": Path(item["checkpoint"]).name,
+                "checkpoint_id": checkpoint_identity(item["checkpoint"]),
                 "signals": signals,
             }
         row["headline"] = headline(row["signals"])
@@ -598,17 +660,64 @@ def _plot(summary: Mapping[str, Any], path: Path) -> None:
 _SETTING_KEYS = ("grid_config", "eps", "exclude_first_token", "delta_from_base", "output_dir", "figure")
 
 
+def reconcile(
+    done: Mapping[str, Mapping[str, Any]],
+    grid_rows: Sequence[Mapping[str, Any]],
+    wanted: set[str],
+    models_dir: str | Path,
+    seeds: Sequence[int],
+) -> tuple[list[Mapping[str, Any]], list[str], list[str]]:
+    """Which measured rows describe the grid as it is now: ``(fresh rows, stale cells, missing cells)``.
+
+    The grid's configured cells (``wanted``) and its results are the reference, not the
+    checkpoints on disk: the rows are committed and the checkpoints (``data/models``) are
+    not, and a checkpoint deleted to free space does not un-measure its row. A cell is
+    *stale* when its row was measured for a different ``holdout_ppl`` than the grid row has
+    now (it was re-run), or, where the checkpoint is on disk, when that is no longer the
+    checkpoint that was measured. Recursion stages have no grid row, so only the second test
+    applies. *Missing* cells have no row at all.
+    """
+    models_dir = Path(models_dir)
+    grid_by_cell = {r["cell"]: r for r in grid_rows}
+    fresh: list[Mapping[str, Any]] = []
+    stale: list[Mapping[str, Any]] = []
+    for cell, row in done.items():
+        path = models_dir / cell
+        on_disk_matches = not path.is_dir() or same_checkpoint(path, row.get("checkpoint_id"))
+        if row["kind"] == "recursion_stage":
+            if row["seed"] in set(seeds):
+                (fresh if on_disk_matches else stale).append(row)
+            continue
+        grid_row = grid_by_cell.get(cell)
+        if grid_row is None:
+            continue
+        measured_now = row.get("grid_holdout_ppl") == grid_row["holdout_ppl"]
+        checkpoint_ok = on_disk_matches if row["kind"] == "cell" else True  # a copy has no checkpoint of its own
+        (fresh if measured_now and checkpoint_ok else stale).append(row)
+    have = {r["cell"] for r in fresh} | {r["cell"] for r in stale}
+    return fresh, sorted(r["cell"] for r in stale), sorted(c for c in wanted if c not in have)
+
+
+def partial_points(summary: Mapping[str, Any], n_seeds: int) -> list[str]:
+    """Summary points averaged over fewer seeds than the grid has, so a thin mean is not read as a full one."""
+    points = [f"{c['type']} ratio {c['ratio']:g}: {c['n_seeds']} of {n_seeds} seeds"
+              for c in summary["curves"] if c["n_seeds"] < n_seeds]
+    points += [f"recursion generation {g['generation']}: {g['n_seeds']} of {n_seeds} seeds"
+               for g in summary["recursion_stages"] if g["n_seeds"] < n_seeds]
+    return points
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Measure white-box signals on the grid's checkpoints.")
     parser.add_argument("--config", default="configs/whitebox.yaml")
     parser.add_argument("--summarize-only", action="store_true",
-                        help="measure nothing; rebuild the summary, tables and figure from whitebox.jsonl")
+                        help="measure nothing and read no checkpoint; rebuild the summary, tables and "
+                             "figure from whitebox.jsonl against the grid's results")
     args = parser.parse_args(argv)
 
     import yaml
 
-    from ..finetune.collapse import load_holdout
-    from ..finetune.grid import config_fingerprint, load_results
+    from ..finetune.grid import config_fingerprint, load_results, make_cells
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     missing_keys = [k for k in _SETTING_KEYS if k not in cfg]
@@ -616,9 +725,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         raise ValueError(f"{args.config} is missing {missing_keys}")
     grid = yaml.safe_load(Path(cfg["grid_config"]).read_text(encoding="utf-8"))
     grid_fp = config_fingerprint(grid)
-    grid_rows = list(load_results(Path(grid["output_dir"]) / "results.jsonl", grid_fp).values())
+    # The fingerprint leaves the axes out so a finished grid can be extended, so the results
+    # can hold cells this config no longer asks for. Ignore them, as the grid does.
+    wanted = {c.id for c in make_cells(grid["types"], grid["ratios"], grid["seeds"])}
+    grid_rows = [r for k, r in load_results(Path(grid["output_dir"]) / "results.jsonl", grid_fp).items()
+                 if k in wanted]
     if not grid_rows:
-        raise SystemExit(f"no grid results in {grid['output_dir']}/results.jsonl")
+        raise SystemExit(f"no grid results for the configured cells in {grid['output_dir']}/results.jsonl")
     settings = settings_fingerprint(grid_fp, {
         "eps": cfg["eps"], "exclude_first_token": cfg["exclude_first_token"],
         "delta_from_base": cfg["delta_from_base"], "max_len": grid["train"]["max_len"],
@@ -627,45 +740,60 @@ def main(argv: Optional[list[str]] = None) -> int:
     rows_path = out / "whitebox.jsonl"
     done = load_rows(rows_path, settings)
 
-    items, missing = plan(grid_rows, grid["models_dir"], grid["seeds"])
-    if missing:
-        print(f"WARNING: {len(missing)} grid cell(s) have no checkpoint in {grid['models_dir']} "
-              f"(was the grid run with keep_models?): {missing[:6]}{'...' if len(missing) > 6 else ''}")
-
     if not args.summarize_only:
-        texts = load_holdout(grid["data"])
-        out.mkdir(parents=True, exist_ok=True)
-
-        def compute(checkpoint: Path) -> dict[str, Any]:
-            print(f"  measuring {checkpoint.name}", flush=True)
-            return compute_checkpoint(
-                checkpoint, texts, max_len=grid["train"]["max_len"], batch_size=grid["train"]["batch_size"],
-                device=grid["device"], eps=cfg["eps"], exclude_first_token=cfg["exclude_first_token"],
-                base_model=grid["base_model"] if cfg["delta_from_base"] else None,
-            )
-
-        def on_result(row: dict[str, Any]) -> None:
-            with rows_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row) + "\n")
-
+        items, no_checkpoint = plan(grid_rows, grid["models_dir"], grid["seeds"])
+        unmeasured = [c for c in no_checkpoint if c not in done]
+        if unmeasured:
+            print(f"WARNING: {len(unmeasured)} grid cell(s) have no checkpoint in {grid['models_dir']} and no "
+                  f"measurement (was the grid run with keep_models?): {unmeasured[:6]}"
+                  f"{'...' if len(unmeasured) > 6 else ''}")
         todo = [it for it in items if not is_current(it, done.get(it["cell"]))]
         print(f"{len(items)} checkpoints, {len(items) - len(todo)} already measured, {len(todo)} to do", flush=True)
-        run_whitebox(items, compute=compute, done=done, on_result=on_result, settings=settings)
-        done = load_rows(rows_path, settings)
+        if todo:
+            from ..finetune.collapse import load_holdout
 
-    wanted = {it["cell"] for it in items}
-    rows = [r for k, r in done.items() if k in wanted]
+            texts = load_holdout(grid["data"])
+            out.mkdir(parents=True, exist_ok=True)
+
+            def compute(checkpoint: Path) -> dict[str, Any]:
+                print(f"  measuring {checkpoint.name}", flush=True)
+                return compute_checkpoint(
+                    checkpoint, texts, max_len=grid["train"]["max_len"], batch_size=grid["train"]["batch_size"],
+                    device=grid["device"], eps=cfg["eps"], exclude_first_token=cfg["exclude_first_token"],
+                    base_model=grid["base_model"] if cfg["delta_from_base"] else None,
+                )
+
+            def on_result(row: dict[str, Any]) -> None:
+                with rows_path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(row) + "\n")
+
+            run_whitebox(items, compute=compute, done=done, on_result=on_result, settings=settings)
+            done = load_rows(rows_path, settings)
+
+    rows, stale, missing = reconcile(done, grid_rows, wanted, grid["models_dir"], grid["seeds"])
     if not rows:
-        raise SystemExit(f"no white-box rows in {rows_path}")
+        raise SystemExit(f"no white-box rows in {rows_path} for the grid as it is now")
+    if stale:
+        print(f"WARNING: {len(stale)} row(s) are out of date (their grid cell was re-run or their checkpoint "
+              f"replaced) and are left out of the summary; run without --summarize-only to measure them "
+              f"again: {stale[:6]}{'...' if len(stale) > 6 else ''}")
+    if missing:
+        print(f"WARNING: {len(missing)} configured cell(s) have no measurement: {missing[:6]}"
+              f"{'...' if len(missing) > 6 else ''}")
     summary = summarize(rows)
+    partial = partial_points(summary, len(grid["seeds"]))
     out.mkdir(parents=True, exist_ok=True)
     (out / "whitebox_summary.json").write_text(
-        json.dumps({"settings": settings, "grid_fingerprint": grid_fp, "missing_cells": missing, **summary}, indent=2),
+        json.dumps({"settings": settings, "grid_fingerprint": grid_fp, "complete": not (stale or missing),
+                    "stale_cells": stale, "missing_cells": missing, "partial_points": partial, **summary},
+                   indent=2),
         encoding="utf-8",
     )
     _plot(summary, Path(cfg["figure"]))
     for key in ("eff_rank_last", "anisotropy_last", "dead_fraction_mean"):
         print(f"\n{key} (mean over seeds):\n" + format_table(summary, key))
+    if partial:
+        print("\nNOTE: averaged over fewer seeds than the grid has: " + "; ".join(partial))
     return 0
 
 
