@@ -1,0 +1,28 @@
+# White-box representational signals (TRD section 6), measured on the grid's checkpoints.
+#
+#   python -m src.evaluation.whitebox --config configs/whitebox.yaml
+#   python -m src.evaluation.whitebox --config configs/whitebox.yaml --summarize-only
+#
+# Nothing is trained. Needs the checkpoints the grid kept (keep_models: true in the grid
+# config, under its models_dir) and its results.jsonl; it measures each one on the fixed
+# hidden-holdout texts, ~1 s per checkpoint on a GPU. Rows are appended to
+# {output_dir}/whitebox.jsonl, so a cut-short run resumes. A grid cell that was re-run
+# (--rerun-types) has a new checkpoint and is measured again. Changing a setting below
+# that affects the numbers makes that file refuse to mix: use a new output_dir.
+
+grid_config: configs/grid.yaml   # results.jsonl, checkpoints (models_dir), holdout texts, base_model, device
+
+# A MLP unit is "dead" when its activation never exceeds this on any token. GELU outputs
+# are at most about -0.17 where they are negative, so 0.01 is "never meaningfully on".
+eps: 0.01
+
+# GPT-2's first position is a huge-norm outlier (an attention sink). Left in, it dominates
+# every covariance and anisotropy figure. Applies to representations and MLP activations.
+exclude_first_token: true
+
+# Also measure how far training moved the weights from base_model (loads it from the
+# Hugging Face cache once): ||W - W0|| / ||W0|| and the effective rank of W - W0.
+delta_from_base: true
+
+output_dir: reports/grid                              # whitebox.jsonl + whitebox_summary.json
+figure: reports/figures/whitebox_signals.png
