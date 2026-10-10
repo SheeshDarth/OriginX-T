@@ -476,6 +476,24 @@ def test_format_table(tmp_path):
     assert table[1].split() == ["0", "100.0000", "100.0000"] and table[2].split() == ["1", "60.0000", "60.0000"]
 
 
+def test_format_table_shows_the_mean_over_seeds_and_a_dash_for_a_missing_point(tmp_path):
+    seed_offset = [0.0, 1.0, 5.0]  # seeds 0, 1, 2: the mean of 60, 61, 65 is 62, the minimum 60, the median 61
+    rows = _summary_rows(tmp_path, lambda name: 60.0 + seed_offset[int(name.split("_s")[1][0])])
+    rows = [r for r in rows if not (r["type"] == "benchmark_near" and r["ratio"] == 0.0)]  # a point with no rows
+    table = wb.format_table(wb.summarize(rows), "eff_rank_last").splitlines()
+    assert table[1].split() == ["0", "-", "62.0000"]  # synthetic's baseline is the mean 62; benchmark_near has none
+    assert table[2].split() == ["1", "62.0000", "62.0000"]
+
+
+def test_the_summary_is_ordered_by_type_then_ratio_and_by_generation(tmp_path):
+    rows = _summary_rows(tmp_path, lambda name: 50.0)
+    rows += [dict(rows[-1], cell="pool_recursive_s0_gen2", kind="recursion_stage", generation=2, ratio=None)]
+    summary = wb.summarize(list(reversed(rows)))  # fed in the opposite order on purpose
+    assert [(c["type"], c["ratio"]) for c in summary["curves"]] == [
+        ("benchmark_near", 0.0), ("benchmark_near", 1.0), ("synthetic", 0.0), ("synthetic", 1.0)]
+    assert [g["generation"] for g in summary["recursion_stages"]] == [1, 2]
+
+
 def test_plot_writes_a_figure(tmp_path):
     pytest.importorskip("matplotlib")
     rows = _summary_rows(tmp_path, lambda name: 100.0 if "_r0_" in name else 60.0)
@@ -1179,7 +1197,7 @@ def test_a_clone_without_the_checkpoints_can_still_summarize_the_committed_rows(
     assert "keep_models" not in capsys.readouterr().out  # no checkpoints were looked for
 
 
-def test_a_checkpoint_deleted_after_it_was_measured_does_not_remove_its_row(tmp_path, monkeypatch):
+def test_a_checkpoint_deleted_after_it_was_measured_does_not_remove_its_row(tmp_path, monkeypatch, capsys):
     import shutil
     from src.finetune import collapse
 
@@ -1190,11 +1208,13 @@ def test_a_checkpoint_deleted_after_it_was_measured_does_not_remove_its_row(tmp_
     shutil.rmtree(tmp_path / "models" / "synthetic_r1_s1")
     monkeypatch.setattr(collapse, "load_holdout", lambda data: pytest.fail("nothing is left to measure"))
     calls.clear()
+    capsys.readouterr()
 
     assert wb.main(["--config", str(config)]) == 0
 
     after = json.loads((tmp_path / "wb/whitebox_summary.json").read_text())
     assert calls == [] and after["missing_cells"] == [] and after["complete"]
+    assert "WARNING" not in capsys.readouterr().out  # it was measured: there is nothing to worry about
     assert after["curves"] == full["curves"]  # every point still has all its seeds
 
 
@@ -1396,3 +1416,20 @@ def test_the_first_token_and_the_threshold_reach_compute_checkpoint(torch_stack,
     assert with_first["n_tokens"] == base["n_tokens"] + len(texts)
     assert all(m["dead_fraction"] == 1.0 for m in loose["mlp"])
     assert any(m["dead_fraction"] < 1.0 for m in base["mlp"])
+
+
+def test_the_update_rank_is_the_mean_over_the_matrices_that_changed(torch_stack):
+    torch, _ = torch_stack
+    np = _np()
+    model = tiny_model(torch_stack)
+    base = wb.block_weights(model)
+    g = torch.Generator().manual_seed(0)
+    with torch.no_grad():  # a rank-1 update to one block's QKV matrix, a rank-4 update to the other's
+        w0, w1 = model.transformer.h[0].attn.c_attn.weight, model.transformer.h[1].attn.c_attn.weight
+        w0 += 0.3 * torch.outer(torch.randn(w0.shape[0], generator=g), torch.randn(w0.shape[1], generator=g))
+        w1 += 0.3 * torch.randn(w1.shape[0], 4, generator=g) @ torch.randn(4, w1.shape[1], generator=g)
+    ranks = [wb.delta_norms(wb.block_weights(model)[k], base[k])[2] for k in ("attn_qkv.0", "attn_qkv.1")]
+    assert ranks[0] == pytest.approx(1.0, abs=1e-3) and ranks[1] > 2.0  # different ranks, so mean != max != min
+
+    delta = wb.model_signals(model, [batch_of(torch_stack, [10, 11])], base_weights=base)["delta"]
+    assert delta["effective_rank"] == pytest.approx(np.mean(ranks)) and delta["effective_rank"] < max(ranks)
