@@ -981,7 +981,7 @@ def test_the_other_contamination_pools_are_built_and_cached(tmp_path, monkeypatc
 
     # only paraphrasing uses a model, and it is the pretrained generator, not the base model
     assert spy.generators == generators
-    pool = load_dataset(tmp_path / "pools" / grid.config_fingerprint(cfg) / f"{kind}_s0.jsonl")
+    pool = load_dataset(grid.pool_path(tmp_path / "pools" / grid.config_fingerprint(cfg), kind, 0))
     assert len(pool) == 10 and {s.source for s in pool} == {kind}
     cell = next(texts for name, texts, _ in spy.trained if name == f"{kind}_r1_s0")
     assert sorted(cell) == sorted(s.response for s in pool)
@@ -1136,3 +1136,360 @@ def test_the_gate_uses_the_configured_ratios_not_the_ratios_that_have_rows(tmp_p
     assert summary["gate_2_status"] == "not_evaluable"
     assert summary["gate"]["types"]["synthetic"]["missing_cells"] == ["synthetic_r0.5_s0", "synthetic_r0.5_s1"]
     assert spy.trained == []
+
+
+# --- pool versions and --rerun-types ---------------------------------------------------------------
+
+def _pools(tmp_path, cfg):
+    return tmp_path / "pools" / grid.config_fingerprint(cfg)
+
+
+def _lines(path):
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def _row(line):
+    return json.loads(line)
+
+
+def _backups(tmp_path):
+    return sorted((tmp_path / "out").glob("results.jsonl.bak-*"))
+
+
+def test_pool_versions_default_to_one_and_only_benchmark_near_is_bumped():
+    assert grid.POOL_VERSIONS == {"benchmark_near": 2}  # the recasing fix; add a type here when its generator changes
+    assert grid.pool_tag("synthetic") == "1" and grid.pool_tag("benchmark_near") == "2"
+    assert grid.pool_tag("recursive") == "1.1"  # built from the synthetic pool, so it carries both versions
+
+
+def test_the_first_version_keeps_the_original_pool_file_name(tmp_path):
+    # existing pools on disk keep being reused: the recursive one costs fine-tuning to rebuild
+    for kind in ("synthetic", "recursive", "paraphrased"):
+        assert grid.pool_path(tmp_path, kind, 3) == tmp_path / f"{kind}_s3.jsonl"
+
+
+def test_a_version_bump_makes_a_new_pool_file_and_leaves_the_other_types_alone(tmp_path, monkeypatch):
+    before = {k: grid.pool_path(tmp_path, k, 0) for k in CONTAMINATION_TYPES}
+    assert before["benchmark_near"] == tmp_path / "benchmark_near_v2_s0.jsonl"
+
+    monkeypatch.setitem(grid.POOL_VERSIONS, "paraphrased", 2)
+    after = {k: grid.pool_path(tmp_path, k, 0) for k in CONTAMINATION_TYPES}
+    assert after["paraphrased"] == tmp_path / "paraphrased_v2_s0.jsonl"
+    assert {k: after[k] for k in after if k != "paraphrased"} == {k: before[k] for k in before if k != "paraphrased"}
+    # and the seed is still part of the name
+    assert grid.pool_path(tmp_path, "paraphrased", 1) != grid.pool_path(tmp_path, "paraphrased", 0)
+
+
+def test_a_pool_built_from_another_pool_goes_stale_with_it(tmp_path, monkeypatch):
+    plain = {k: grid.pool_path(tmp_path, k, 0) for k in CONTAMINATION_TYPES}
+
+    monkeypatch.setitem(grid.POOL_VERSIONS, "synthetic", 2)
+    bumped = {k: grid.pool_path(tmp_path, k, 0) for k in CONTAMINATION_TYPES}
+    assert {k for k in plain if plain[k] != bumped[k]} == {"synthetic", "recursive"}
+    assert bumped["recursive"] == tmp_path / "recursive_v1.2_s0.jsonl"
+
+    monkeypatch.setitem(grid.POOL_VERSIONS, "synthetic", 1)
+    monkeypatch.setitem(grid.POOL_VERSIONS, "recursive", 2)  # its own generator changed
+    assert grid.pool_path(tmp_path, "recursive", 0) == tmp_path / "recursive_v2.1_s0.jsonl"
+    assert grid.pool_path(tmp_path, "synthetic", 0) == plain["synthetic"]
+
+
+def test_a_stale_cached_benchmark_pool_is_not_reused(tmp_path, monkeypatch):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,), types=["benchmark_near"], ratios=[0.0, 1.0])
+    # a pool written by the old generator sits where the old code cached it
+    old = _pools(tmp_path, cfg) / "benchmark_near_s0.jsonl"
+    stale = [Sample(sample_id=f"old{i}", response=f"STALE ALL CAPS COPY {i}", source="benchmark_near") for i in range(10)]
+    write_jsonl(stale, old)
+    before = old.read_bytes()
+
+    assert grid.main(["--config", str(config)]) == 0
+
+    trained = next(texts for name, texts, _ in spy.trained if name == "benchmark_near_r1_s0")
+    assert not any("STALE" in t for t in trained)
+    assert grid.pool_path(_pools(tmp_path, cfg), "benchmark_near", 0).exists()  # a new file was built
+    assert old.read_bytes() == before  # and the old one was left alone
+
+
+def test_rows_record_the_pool_version_of_contaminated_cells_only(tmp_path, monkeypatch):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,), types=["synthetic", "recursive", "benchmark_near"])
+    assert grid.main(["--config", str(config)]) == 0
+
+    rows = {r["cell"]: r for r in map(_row, _lines(tmp_path / "out/results.jsonl"))}
+    assert {k: r.get("pool_version") for k, r in rows.items() if r["ratio"] > 0} == {
+        "synthetic_r1_s0": "1", "recursive_r1_s0": "1.1", "benchmark_near_r1_s0": "2"
+    }
+    assert all("pool_version" not in r for r in rows.values() if r["ratio"] == 0)  # no pool, never stale
+    assert grid.stale_cells(list(rows.values())) == []
+    assert json.loads((tmp_path / "out/summary.json").read_text())["stale_cells"] == []
+
+
+def test_rows_from_an_older_generator_are_reported_as_stale(tmp_path, monkeypatch, capsys):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,), types=["synthetic", "benchmark_near"])
+    assert grid.main(["--config", str(config)]) == 0
+
+    # rows written before pool versions existed carry no pool_version: they count as version 1
+    results = tmp_path / "out/results.jsonl"
+    old_rows = []
+    for line in _lines(results):
+        row = _row(line)
+        row.pop("pool_version", None)
+        old_rows.append(json.dumps(row))
+    results.write_text("\n".join(old_rows) + "\n")
+    capsys.readouterr()
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    out = capsys.readouterr().out
+    assert "1 cell(s) were made with an older version" in out and "--rerun-types benchmark_near" in out
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["stale_cells"] == ["benchmark_near_r1_s0"]  # not synthetic (still version 1), not ratio 0
+
+
+def _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0, 1), **overrides):
+    config, cfg, spy = _setup(
+        tmp_path, monkeypatch, seeds=seeds, types=["synthetic", "recursive", "benchmark_near"], **overrides
+    )
+    assert grid.main(["--config", str(config)]) == 0
+    return config, cfg, spy
+
+
+def test_rerun_types_drops_only_that_types_contaminated_rows_and_trains_just_those_cells(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch)
+    results = tmp_path / "out/results.jsonl"
+    # mark the rows that will be redone with a value no run produces, so "was redone" never depends on
+    # timings (a coarse clock makes two runs' `seconds` equal)
+    rows = [_row(l) for l in _lines(results)]
+    for r in rows:
+        if r["type"] == "benchmark_near" and r["ratio"] > 0:
+            r["benchmark_ppl"] = -1.0
+    results.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    original = results.read_bytes()
+    original_rows = {_row(l)["cell"]: l for l in _lines(results)}
+    assert len(original_rows) == 12
+    spy.trained.clear()
+    seen_during_training = {}
+
+    # look at the file at the moment the first cell is trained: the dropped rows must already be gone
+    real_train = grid.train_lora
+
+    def watching(texts, out_dir, **kw):
+        seen_during_training.setdefault("rows", {_row(l)["cell"] for l in _lines(results)})
+        return real_train(texts, out_dir, **kw)
+
+    monkeypatch.setattr(grid, "train_lora", watching)
+    assert grid.main(["--config", str(config), "--rerun-types", "benchmark_near"]) == 0
+
+    # only the contaminated benchmark_near cells were trained: no baseline, no other type
+    assert sorted(name for name, _, _ in spy.trained) == ["benchmark_near_r1_s0", "benchmark_near_r1_s1"]
+    # the backup is the file as it was, next to it
+    (backup,) = _backups(tmp_path)
+    assert backup.read_bytes() == original and backup.parent == results.parent
+    # while training, the dropped rows were gone and everything else (incl. the baselines) was there
+    assert seen_during_training["rows"] == set(original_rows) - {"benchmark_near_r1_s0", "benchmark_near_r1_s1"}
+    # afterwards the grid is whole again; every row but the two redone is byte-for-byte what it was
+    now = {_row(l)["cell"]: l for l in _lines(results)}
+    assert set(now) == set(original_rows)
+    assert {k: v for k, v in now.items() if not k.startswith("benchmark_near_r1")} == {
+        k: v for k, v in original_rows.items() if not k.startswith("benchmark_near_r1")
+    }
+    assert {k for k in now if now[k] != original_rows[k]} == {"benchmark_near_r1_s0", "benchmark_near_r1_s1"}
+    assert all(_row(now[k])["benchmark_ppl"] != -1.0 for k in ("benchmark_near_r1_s0", "benchmark_near_r1_s1"))
+    assert not (tmp_path / "out/results.jsonl.tmp").exists()
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["complete"] and summary["stale_cells"] == []
+
+
+def test_rerun_types_keeps_the_shared_ratio_zero_baselines(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch)
+    results = tmp_path / "out/results.jsonl"
+    baselines = {_row(l)["cell"]: l for l in _lines(results) if _row(l)["ratio"] == 0}
+    assert set(baselines) == {f"{t}_r0_s{s}" for t in ("synthetic", "recursive", "benchmark_near") for s in (0, 1)}
+    spy.trained.clear()
+
+    assert grid.main(["--config", str(config), "--rerun-types", "benchmark_near", "synthetic"]) == 0
+
+    assert {k: v for k, v in ((_row(l)["cell"], l) for l in _lines(results)) if k in baselines} == baselines
+    assert not [n for n, _, _ in spy.trained if "_r0_" in n]  # nothing was retrained at ratio 0
+    assert sorted(n for n, _, _ in spy.trained) == [
+        f"{t}_r1_s{s}" for t in ("benchmark_near", "synthetic") for s in (0, 1)
+    ]  # and the type that was not named was not touched
+
+
+def test_rerun_types_uses_the_new_pool_and_marks_the_rows_current(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0,))
+    results = tmp_path / "out/results.jsonl"
+    # make the finished results look like they came from the generator before the fix: version 1 rows,
+    # and a version-1 pool on disk
+    rows = [_row(l) for l in _lines(results)]
+    for r in rows:
+        if r["type"] == "benchmark_near" and r["ratio"] > 0:
+            r["pool_version"] = "1"
+    results.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    old_pool = _pools(tmp_path, cfg) / "benchmark_near_s0.jsonl"
+    write_jsonl([Sample(sample_id=f"old{i}", response=f"STALE {i}", source="benchmark_near") for i in range(10)], old_pool)
+    assert grid.stale_cells([_row(l) for l in _lines(results)]) == ["benchmark_near_r1_s0"]
+    spy.trained.clear()
+
+    assert grid.main(["--config", str(config), "--rerun-types", "benchmark_near"]) == 0
+
+    (name, texts, _), = [t for t in spy.trained]
+    assert name == "benchmark_near_r1_s0" and not any("STALE" in t for t in texts)
+    assert _row(next(l for l in _lines(results) if "benchmark_near_r1_s0" in l))["pool_version"] == "2"
+    assert grid.stale_cells([_row(l) for l in _lines(results)]) == []
+
+
+def test_rerun_types_refuses_results_made_under_different_settings(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch)
+    results = tmp_path / "out/results.jsonl"
+    original = results.read_bytes()
+    spy.trained.clear()
+
+    cfg["train"]["lr"] = 1.0  # part of the fingerprint
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    with pytest.raises(ValueError, match="different settings"):
+        grid.main(["--config", str(config), "--rerun-types", "benchmark_near"])
+
+    assert results.read_bytes() == original  # not rewritten
+    assert _backups(tmp_path) == [] and spy.trained == []  # no backup made, nothing trained
+
+
+def test_rerun_types_rejects_unknown_types_and_summarize_only(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0,))
+    original = (tmp_path / "out/results.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="paraphrased"):
+        grid.main(["--config", str(config), "--rerun-types", "paraphrased"])  # not one of this config's types
+    with pytest.raises(SystemExit) as exc:
+        grid.main(["--config", str(config), "--rerun-types", "benchmark_near", "--summarize-only"])
+    assert exc.value.code == 2
+    assert (tmp_path / "out/results.jsonl").read_bytes() == original and _backups(tmp_path) == []
+
+
+def test_rerun_types_with_nothing_to_drop_makes_no_backup_but_still_fills_in_missing_cells(tmp_path, monkeypatch):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,), types=["synthetic"])
+    assert grid.main(["--config", str(config)]) == 0
+    cfg["types"] = ["synthetic", "benchmark_near"]  # the grid grows a type that has never run
+    config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    spy.trained.clear()
+
+    assert grid.main(["--config", str(config), "--rerun-types", "benchmark_near"]) == 0
+
+    assert _backups(tmp_path) == []
+    assert [n for n, _, _ in spy.trained] == ["benchmark_near_r1_s0"]  # its ratio 0 is the shared baseline
+
+
+def test_rerun_types_only_trains_the_named_types_even_on_a_partial_grid(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0,))
+    results = tmp_path / "out/results.jsonl"
+    kept = [l for l in _lines(results) if "synthetic_r1_s0" not in l]  # a cell of ANOTHER type is missing
+    results.write_text("\n".join(kept) + "\n")
+    spy.trained.clear()
+
+    assert grid.main(["--config", str(config), "--rerun-types", "benchmark_near"]) == 0
+
+    assert [n for n, _, _ in spy.trained] == ["benchmark_near_r1_s0"]  # synthetic_r1_s0 is still missing
+    assert json.loads((tmp_path / "out/summary.json").read_text())["missing_cells"] == ["synthetic_r1_s0"]
+
+
+def test_two_reruns_in_the_same_second_keep_both_backups(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0,))
+    monkeypatch.setattr(grid.time, "strftime", lambda fmt: "STAMP")
+    results = tmp_path / "out/results.jsonl"
+    first = results.read_bytes()
+
+    assert grid.main(["--config", str(config), "--rerun-types", "benchmark_near"]) == 0
+    second = results.read_bytes()
+    assert grid.main(["--config", str(config), "--rerun-types", "benchmark_near"]) == 0
+
+    assert [b.name for b in _backups(tmp_path)] == ["results.jsonl.bak-STAMP", "results.jsonl.bak-STAMP-1"]
+    backups = {b.name: b.read_bytes() for b in _backups(tmp_path)}
+    assert backups["results.jsonl.bak-STAMP"] == first  # the original results are never overwritten
+    assert backups["results.jsonl.bak-STAMP-1"] == second
+
+
+def test_drop_types_keeps_rows_outside_the_config_and_the_order(tmp_path):
+    path = tmp_path / "results.jsonl"
+    rows = [
+        {"cell": "a_r0_s0", "type": "a", "ratio": 0.0, "seed": 0, "config": "fp"},
+        {"cell": "a_r1_s0", "type": "a", "ratio": 1.0, "seed": 0, "config": "fp"},
+        {"cell": "b_r1_s0", "type": "b", "ratio": 1.0, "seed": 0, "config": "fp"},
+        {"cell": "b_r0.5_s9", "type": "b", "ratio": 0.5, "seed": 9, "config": "fp"},  # not in any current grid
+        {"cell": "c_r1_s0", "type": "c", "ratio": 1.0, "seed": 0, "config": "fp"},
+    ]
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    kept, dropped, backup = grid.drop_types(path, "fp", ["b"])
+
+    assert dropped == ["b_r1_s0", "b_r0.5_s9"]
+    assert list(kept) == ["a_r0_s0", "a_r1_s0", "c_r1_s0"]
+    assert [_row(l)["cell"] for l in _lines(path)] == list(kept)
+    assert backup.read_text() == "".join(json.dumps(r) + "\n" for r in rows)
+    with pytest.raises(ValueError, match="different settings"):
+        grid.drop_types(path, "other", ["b"])
+
+
+def test_rows_from_before_pool_versions_flag_only_the_cells_whose_generator_changed():
+    # what the committed results of the full grid look like: no pool_version on any row
+    legacy = [
+        {"cell": f"{t}_r{r:g}_s0", "type": t, "ratio": r, "seed": 0}
+        for t in CONTAMINATION_TYPES for r in (0.0, 0.5, 1.0)
+    ]
+    # only benchmark_near's generator changed; synthetic, recursive and paraphrased are not redone
+    assert grid.stale_cells(legacy) == ["benchmark_near_r0.5_s0", "benchmark_near_r1_s0"]
+
+
+def test_a_bump_marks_legacy_rows_stale_for_the_type_and_whatever_is_built_from_it(monkeypatch):
+    legacy = [
+        {"cell": f"{t}_r1_s0", "type": t, "ratio": 1.0, "seed": 0} for t in CONTAMINATION_TYPES
+    ]
+    monkeypatch.setitem(grid.POOL_VERSIONS, "synthetic", 2)
+    assert grid.stale_cells(legacy) == ["synthetic_r1_s0", "recursive_r1_s0", "benchmark_near_r1_s0"]
+    monkeypatch.setitem(grid.POOL_VERSIONS, "synthetic", 1)
+    monkeypatch.setitem(grid.POOL_VERSIONS, "paraphrased", 2)
+    assert grid.stale_cells(legacy) == ["paraphrased_r1_s0", "benchmark_near_r1_s0"]
+
+
+def test_the_stale_warning_names_every_type_that_needs_a_rerun(tmp_path, monkeypatch, capsys):
+    config, cfg, spy = _setup(
+        tmp_path, monkeypatch, seeds=(0,), types=["synthetic", "paraphrased", "benchmark_near"]
+    )
+    assert grid.main(["--config", str(config)]) == 0
+    results = tmp_path / "out/results.jsonl"
+    rows = [_row(l) for l in _lines(results)]
+    for r in rows:
+        r.pop("pool_version", None)  # as if written before versions existed
+    results.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    monkeypatch.setitem(grid.POOL_VERSIONS, "paraphrased", 2)
+    capsys.readouterr()
+
+    assert grid.main(["--config", str(config), "--summarize-only"]) == 0
+
+    out = capsys.readouterr().out
+    assert "2 cell(s) were made with an older version" in out
+    assert "--rerun-types benchmark_near paraphrased" in out  # sorted, both, and not synthetic
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert summary["stale_cells"] == ["paraphrased_r1_s0", "benchmark_near_r1_s0"]
+
+
+def test_mlflow_params_tell_a_rerun_from_the_original(tmp_path, monkeypatch):
+    seen = {}
+
+    @contextmanager
+    def fake_track_run(cfg, name, params, tags=None):
+        seen[name] = dict(params)
+        yield Run()
+
+    monkeypatch.setattr(grid, "track_run", fake_track_run)
+    config, cfg, spy = _setup(tmp_path, monkeypatch, seeds=(0,), types=["benchmark_near"])
+    assert grid.main(["--config", str(config)]) == 0
+
+    assert seen["benchmark_near_r1_s0"]["pool_version"] == "2"
+    assert seen["benchmark_near_r0_s0"]["pool_version"] == "none"  # all human: no pool
+
+
+def test_rerun_types_needs_at_least_one_type(tmp_path, monkeypatch):
+    config, cfg, spy = _finished_with_benchmark(tmp_path, monkeypatch, seeds=(0,))
+    original = (tmp_path / "out/results.jsonl").read_bytes()
+    with pytest.raises(SystemExit) as exc:
+        grid.main(["--config", str(config), "--rerun-types"])
+    assert exc.value.code == 2
+    assert (tmp_path / "out/results.jsonl").read_bytes() == original and _backups(tmp_path) == []

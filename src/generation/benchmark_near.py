@@ -14,6 +14,25 @@ belongs with the synthetic generators.
 ``benchmark_near_score`` is *measured* per sample with ``difflib``, not assumed
 — an exact copy scores 1.0, a reformatted one lower, and the detector is then
 scored against a real number rather than a label we invented.
+
+Why the text is never recased as a whole. An earlier version rewrote about half
+of the perturbed copies in full ALL CAPS or all lowercase (a quarter each). That
+is the same content, and ``similarity()`` rightly scores it 1.0, but it is not
+the same text to GPT-2. ALL CAPS shares almost no token with the original
+(``THE RAILWAY`` against ``The railway``): it changes 71-87% of a passage's
+pre-tokens. Lowercasing is milder, 5-20%, since only the capitalised words
+change. So the "near-duplicates" were often not near to the model. The full
+Sprint-6 grid (PR #12, 3 seeds) saw the effect: training on them *raised*
+benchmark-item perplexity by 4.7% at ratio 1 instead of lowering it. One-seed
+(seed 0) checks run outside the grid in that PR, on 100% verbatim copies, lowered
+it by 4.9% (1 epoch) and 13.4% (3 epochs, against a 3-epoch baseline), and the
+grid's holdout damage from these copies was +8% against +1.2% for verbatim ones.
+Those checks compare verbatim with perturbed copies as a whole, so they do not
+separate the recasing from the other edits (the old whitespace padding doubled
+every space); both are fixed here, and a re-run of the benchmark_near cells is
+the test. Every perturbation is now a surface edit that leaves most tokens as
+they were: a flipped first letter or sentence start, a double space after a
+sentence, swapped punctuation.
 """
 
 from __future__ import annotations
@@ -28,14 +47,50 @@ from ..ingestion.schema import Sample
 _PUNCT_SWAPS = {".": " .", ",": " ,", "!": ".", "?": " ?", ";": ",", "'": "", '"': ""}
 
 
+_LETTER = r"[^\W\d_]"
+_FIRST_LETTER = re.compile(_LETTER)
+# the first letter after a sentence end, allowing a closing quote or bracket in between
+_AFTER_SENTENCE_END = re.compile(rf"[.!?][\"')\]]*\s+(?={_LETTER})")
+
+
 def _recase(text: str, rng: random.Random) -> str:
-    return text.lower() if rng.random() < 0.5 else text.upper()
+    """Flip the case of the first letter, or of every sentence start. Never the whole text.
+
+    A pipeline that lower-cases or capitalises sentence starts changes one token
+    per sentence. Recasing everything would change far more: about 71-87% of the
+    tokens in ALL CAPS and 5-20% in lowercase (see the module docstring). So if an
+    edit would leave a mixed-case text entirely upper or lower case, the text is
+    returned unchanged instead.
+    """
+    first = _FIRST_LETTER.search(text)
+    if first is None:
+        return text
+    starts = [first.start()] + [m.end() for m in _AFTER_SENTENCE_END.finditer(text)]
+    chars = list(text)
+    for i in starts[:1] if rng.random() < 0.5 else starts:
+        chars[i] = chars[i].swapcase()
+    out = "".join(chars)
+    mixed = text not in (text.lower(), text.upper())
+    return text if mixed and out in (out.lower(), out.upper()) else out
 
 
 def _respace(text: str, rng: random.Random) -> str:
-    """Collapse or pad whitespace — the classic pipeline reformat."""
+    """Collapse whitespace, or pad it the way old typewriter-style text does.
+
+    Padding is a double space after each sentence end (or, if there is none, at one
+    place), not after every word: doubling every space makes up to half of the
+    tokens a lone-space filler and changes the context of every word.
+    """
     collapsed = re.sub(r"\s+", " ", text).strip()
-    return collapsed.replace(" ", "  ") if rng.random() < 0.5 else collapsed
+    if rng.random() < 0.5:
+        return collapsed
+    padded = re.sub(r"(?<=[.!?]) (?=\S)", "  ", collapsed)
+    if padded == collapsed:
+        gaps = [m.start() for m in re.finditer(" ", collapsed)]
+        if gaps:
+            i = rng.choice(gaps)
+            padded = collapsed[:i] + "  " + collapsed[i + 1 :]
+    return padded
 
 
 def _repunct(text: str, rng: random.Random) -> str:
@@ -49,7 +104,15 @@ _PERTURBATIONS = (_recase, _respace, _repunct)
 
 
 def perturb(text: str, rng: random.Random) -> str:
-    """Apply one or two surface edits. Meaning is preserved; the string is not."""
+    """Apply one or two surface edits. Meaning is preserved; the string is not.
+
+    The edits are mild by construction. Over 200 seeds, on WikiText-style text the
+    result keeps about 90% or more of the original's whitespace-separated words
+    (worst case 89.8%) and about 86% or more of its GPT-2 pre-tokens by difflib
+    ratio (worst case 85.6%); on punctuation-dense prose (many commas, quotes and
+    apostrophes, which ``_repunct`` rewrites) the worst case is about 74% of the
+    words and 77% of the pre-tokens.
+    """
     for op in rng.sample(_PERTURBATIONS, rng.randint(1, 2)):
         text = op(text, rng)
     return text.strip() or text
@@ -59,9 +122,13 @@ def similarity(a: str, b: str) -> float:
     """Content similarity in [0, 1], ignoring case and whitespace (1.0 == same content).
 
     Deliberately blind to formatting: an ALL-CAPS or re-wrapped copy of a
-    benchmark item is a *complete* leak — the model still memorises the answer —
-    so it must score 1.0. Comparing raw characters would score it near zero and
-    hand the detector wrong ground truth.
+    benchmark item is a *complete* leak of the content, so a detector should find
+    it, and it must score 1.0. Comparing raw characters would score it near zero
+    and hand the detector wrong ground truth.
+
+    That is a statement about content, not about what a model will memorise: a
+    fully recased copy scores 1.0 here yet GPT-2 sees different tokens, which is
+    why :func:`perturb` no longer recases whole texts (module docstring, PR #12).
     """
     fold = lambda s: re.sub(r"\s+", " ", s).strip().lower()  # noqa: E731
     return difflib.SequenceMatcher(None, fold(a), fold(b)).ratio()
