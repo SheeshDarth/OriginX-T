@@ -1,0 +1,38 @@
+# White-box representational signals (TRD section 6), measured on the grid's checkpoints.
+#
+#   python -m src.evaluation.whitebox --config configs/whitebox.yaml
+#   python -m src.evaluation.whitebox --config configs/whitebox.yaml --summarize-only
+#
+# Nothing is trained. Measuring needs the checkpoints the grid kept (keep_models: true in
+# the grid config, under its models_dir) and its results.jsonl; each is run once over the
+# fixed hidden-holdout texts and its weights are read. Expect on the order of a minute per
+# checkpoint on a few CPU cores (about 55 s on a 4-core box, mostly the SVDs of the weight
+# matrices, which a GPU does not speed up), so about an hour for the 57 of the full grid.
+#
+# Rows are appended to {output_dir}/whitebox.jsonl, so a cut-short run resumes. A row is
+# measured again when its grid cell was re-run (--rerun-types: a new holdout_ppl) or its
+# checkpoint was replaced (its weights file no longer matches the one measured).
+# --summarize-only needs neither the checkpoints nor the holdout: it reads whitebox.jsonl
+# against the grid's results, leaves out rows that are out of date, and says so.
+# Changing a setting below that affects the numbers makes the file refuse to mix: use a
+# new output_dir.
+
+grid_config: configs/grid.yaml   # results.jsonl, checkpoints (models_dir), holdout texts, base_model, device
+
+# A MLP unit is "dead" when its activation never exceeds this on any token. GELU never goes
+# below about -0.17, and for most negative inputs it is close to 0, so a unit that stays at or
+# below 0.01 on every token is "never meaningfully on".
+eps: 0.01
+
+# GPT-2's first position is a huge-norm outlier (an attention sink). Left in, it dominates the
+# covariance spectrum (effective rank, participation ratio) of the layers before the final
+# LayerNorm; anisotropy, on unit vectors, hardly moves. Applies to representations and MLP
+# activations, and assumes right padding (set explicitly when the checkpoint is loaded).
+exclude_first_token: true
+
+# Also measure how far training moved the weights from base_model (loads it from the
+# Hugging Face cache once): ||W - W0|| / ||W0|| and the effective rank of W - W0.
+delta_from_base: true
+
+output_dir: reports/grid                              # whitebox.jsonl + whitebox_summary.json
+figure: reports/figures/whitebox_signals.png

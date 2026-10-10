@@ -114,6 +114,7 @@ python -m src.finetune.grid --config configs/grid_smoke.yaml           # minutes
 python -m src.finetune.grid --config configs/grid.yaml                 # the full grid (resumable)
 python -m src.finetune.grid --config configs/grid.yaml --summarize-only   # re-apply GATE 2, redraw the figure; trains nothing
 python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near   # redo one type's cells after its generator changed
+python -m src.evaluation.whitebox --config configs/whitebox.yaml   # white-box signals (effective rank, anisotropy, ...) from the kept checkpoints
 ```
 
 GPU work (fine-tuning) runs on free Google Colab / Kaggle notebooks — see
