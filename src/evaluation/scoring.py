@@ -10,7 +10,8 @@ one class present) instead of returning a number that looks fine.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+import random
+from collections.abc import Callable, Sequence
 
 
 def _check(labels: Sequence[int], scores: Sequence[float], both_classes: bool = True) -> None:
@@ -84,3 +85,41 @@ def f1_at(labels: Sequence[int], scores: Sequence[float], threshold: float) -> f
     fp = sum(1 for p, y in zip(pred, labels) if p and y == 0)
     fn = sum(1 for p, y in zip(pred, labels) if not p and y == 1)
     return 2 * tp / (2 * tp + fp + fn) if tp else 0.0
+
+
+def bootstrap_ci(
+    metric: Callable[..., float],
+    *columns: Sequence,
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """(point estimate, lower, upper): a percentile bootstrap interval for ``metric``.
+
+    ``columns`` are parallel sequences (for example labels and scores); examples
+    are resampled together with replacement and ``metric(*resampled)`` is
+    recomputed. A resample the metric refuses (``ValueError``, such as one that
+    lost every positive) is redrawn; if more than half the draws are refused the
+    interval is not trustworthy and this raises. Seeded, so it is reproducible.
+    """
+    n = len(columns[0])
+    if any(len(c) != n for c in columns):
+        raise ValueError("columns differ in length")
+    if n_boot < 1 or not 0 < alpha < 1:
+        raise ValueError("need n_boot >= 1 and 0 < alpha < 1")
+    point = metric(*columns)
+    rng = random.Random(seed)
+    stats: list[float] = []
+    refused = 0
+    while len(stats) < n_boot:
+        idx = [rng.randrange(n) for _ in range(n)]
+        try:
+            stats.append(metric(*[[c[i] for i in idx] for c in columns]))
+        except ValueError:
+            refused += 1
+            if refused > n_boot:
+                raise ValueError("over half the bootstrap resamples could not be scored") from None
+    stats.sort()
+    lo = stats[min(n_boot - 1, int(math.floor(alpha / 2 * n_boot)))]
+    hi = stats[min(n_boot - 1, int(math.ceil((1 - alpha / 2) * n_boot)) - 1)]
+    return point, lo, hi
