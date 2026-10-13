@@ -159,9 +159,15 @@ re-run: `python -m src.finetune.grid --config configs/grid.yaml --rerun-types be
 GATE 2 does not depend on it.
 
 Done so far: the contamination generators, the hidden-holdout safeguards, run logging
-(MLflow), and the fine-tuning grid with its results. Not in the repo yet: the feature
-suite (`src/features/`), and with it the risk classifier, conformal prediction and
-survival models that need it (GATE 1 and GATE 3). See the roadmap for the full plan.
+(MLflow), the fine-tuning grid with its results, the white-box signals
+(`src/evaluation/whitebox.py`, [#15](https://github.com/SheeshDarth/OriginX-T/pull/15);
+**not yet measured on the real checkpoints**), the scoring metrics
+(`src/evaluation/scoring.py`, [#16](https://github.com/SheeshDarth/OriginX-T/pull/16):
+AUROC/AUPRC/F1, bootstrap CIs, ECE, conformal coverage, lead stage) and a per-run table
+joining the two ([#17](https://github.com/SheeshDarth/OriginX-T/pull/17)). Not in the repo
+yet: the feature suite proper (`src/features/` holds only that table), and with it the
+risk classifier, conformal prediction and survival models that need it (GATE 1 and
+GATE 3). What counts as "collapsed" (the label) is still to be fixed by the team. See the roadmap for the full plan.
 Weekly updates go to the faculty guide; see the template in
 [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#hod-reporting).
 
