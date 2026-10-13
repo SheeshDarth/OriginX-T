@@ -1,0 +1,34 @@
+# GATE 3 (TRD section 11): "risk model beats a random baseline; lead-time > 0", on the grid.
+#
+#   python -m src.evaluation.earlywarning --config configs/earlywarning.yaml
+#
+# Reads reports/grid/results.jsonl and reports/grid/whitebox.jsonl (so the white-box
+# measurement must have been run), joins them with src.features.run_table, and writes
+# {output_dir}/earlywarning.json.
+#
+# THESE SETTINGS ARE THE RULE. Fix them before looking at the results, as with the GATE 2
+# rule in configs/grid.yaml, and change them only on purpose. A collapse onset is the first
+# ratio whose holdout perplexity is more than the baseline spread above its own ratio-0 run
+# (no setting: it reuses GATE 2's noise floor).
+
+grid_results: reports/grid/results.jsonl
+whitebox_results: reports/grid/whitebox.jsonl
+output_dir: reports/grid
+
+gate3:
+  # white-box signal -> direction: +1 if it rises as the model degrades, -1 if it falls.
+  # Effective rank and participation ratio shrink as representations collapse; anisotropy
+  # and dead neurons are expected to grow. These are expectations stated in advance, not
+  # fitted to the data; a signal that moves the other way simply does not warn.
+  signals:
+    eff_rank_last: -1
+    part_ratio_last: -1
+    anisotropy_last: 1
+    dead_fraction_mean: 1
+    stable_rank_attn: -1
+    delta_rel_norm: 1
+  alpha: 0.05        # split across the signals above (Bonferroni)
+  far: 0.05          # false-alarm rate allowed among trajectories that never collapse
+  n_boot: 1000       # bootstrap resamples for the AUROC interval
+  n_perm: 10000      # label permutations for the random baseline
+  seed: 0
