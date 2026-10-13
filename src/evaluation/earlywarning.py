@@ -50,3 +50,30 @@ def collapse_onsets(table: Sequence[Row]) -> dict[Key, int | None]:
             (i for i, r in enumerate(rows) if r["holdout_ppl"] - base > spread[key[0]]), None
         )
     return onsets
+
+
+def risk_trajectories(
+    table: Sequence[Row], signal: str, direction: int
+) -> tuple[list[Key], list[list[float]], list[int | None], list[Key]]:
+    """Per-stage risk of each trajectory from one white-box signal.
+
+    Risk at stage k is ``direction * (x_k - x_0)``: how far the signal has moved,
+    in the direction that means "worse" (+1 if it rises as the model degrades, -1
+    if it falls), from that trajectory's own ratio-0 value. It uses nothing from
+    later stages. Returns (keys, risks, onsets, skipped): a trajectory with any
+    stage lacking a fresh value for the signal is skipped, not patched.
+    """
+    if direction not in (1, -1):
+        raise ValueError("direction must be +1 or -1")
+    onsets = collapse_onsets(table)
+    col = f"wb_{signal}"
+    keys, risks, ons, skipped = [], [], [], []
+    for key, rows in trajectories(table).items():
+        values = [r.get(col) for r in rows]
+        if any(v is None for v in values) or any(r.get("wb_status") != "fresh" for r in rows):
+            skipped.append(key)
+            continue
+        keys.append(key)
+        risks.append([direction * (v - values[0]) for v in values])
+        ons.append(onsets[key])
+    return keys, risks, ons, skipped

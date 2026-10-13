@@ -47,3 +47,38 @@ def test_stage_zero_is_never_a_collapse_and_a_missing_baseline_is_refused():
     assert collapse_onsets(_table("a", 0, [50] * 5) + _table("a", 1, [50] * 5))[("a", 0)] is None
     with pytest.raises(ValueError, match="no ratio-0"):
         collapse_onsets(_table("a", 0, [50] * 5) + [{"type": "a", "seed": 1, "ratio": 0.5, "holdout_ppl": 60}])
+
+
+def _wb(rows, values, status="fresh"):
+    return [{**r, "wb_eff_rank_last": v, "wb_status": status} for r, v in zip(rows, values)]
+
+
+def test_risk_is_the_signed_move_from_the_trajectorys_own_first_stage():
+    from src.evaluation.earlywarning import risk_trajectories
+
+    rows = _wb(_table("a", 0, [50, 52, 56, 60, 64]), [10, 9, 7, 6, 5])
+    rows += _wb(_table("a", 1, [50.5] * 5), [20, 20, 21, 20, 20])
+    keys, risks, onsets, skipped = risk_trajectories(rows, "eff_rank_last", direction=-1)
+    assert keys == [("a", 0), ("a", 1)] and skipped == []
+    assert risks[0] == [0, 1, 3, 4, 5]  # effective rank falling = rising risk
+    assert risks[1] == [0, 0, -1, 0, 0]
+    assert onsets == [1, None]
+    assert risk_trajectories(rows, "eff_rank_last", direction=1)[1][0] == [0, -1, -3, -4, -5]
+
+
+def test_a_trajectory_with_a_stale_or_missing_stage_is_skipped_not_patched():
+    from src.evaluation.earlywarning import risk_trajectories
+
+    good = _wb(_table("a", 0, [50, 52, 56, 60, 64]), [10, 9, 7, 6, 5])
+    stale = _wb(_table("a", 1, [50.5] * 5), [1, 2, 3, 4, 5])
+    stale[2]["wb_status"] = "stale"
+    gap = _wb(_table("b", 0, [50] * 5), [1, 2, None, 4, 5])
+    keys, _, _, skipped = risk_trajectories(good + stale + gap, "eff_rank_last", direction=-1)
+    assert keys == [("a", 0)] and skipped == [("a", 1), ("b", 0)]
+
+
+def test_direction_must_be_plus_or_minus_one():
+    from src.evaluation.earlywarning import risk_trajectories
+
+    with pytest.raises(ValueError, match="direction"):
+        risk_trajectories([], "eff_rank_last", direction=0)
