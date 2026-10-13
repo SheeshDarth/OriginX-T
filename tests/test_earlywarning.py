@@ -135,3 +135,66 @@ def test_evaluation_is_reproducible_for_a_seed():
     risks, onsets = _separable()
     a = evaluate_risk(risks, onsets, far=0.0, n_boot=100, n_perm=100, seed=5)
     assert a == evaluate_risk(risks, onsets, far=0.0, n_boot=100, n_perm=100, seed=5)
+
+
+def _gate_table(signal_moves=True):
+    """Two collapsers (onset stage 2) whose rank falls at stage 1, two runs that never collapse."""
+    specs = [
+        ([50.0, 50.2, 56, 60, 66], [10, 8, 6, 5, 4]),
+        ([50.3, 50.4, 57, 61, 67], [10, 9, 6, 5, 3]),
+        ([50.1, 50.2, 50.3, 50.2, 50.1], [10, 10, 10, 10, 10]),
+        ([50.2, 50.1, 50.2, 50.3, 50.1], [10, 10, 10, 10, 10]),
+    ]
+    rows = []
+    for seed, (ppls, sig) in enumerate(specs):
+        rows += _wb(_table("t", seed, ppls), sig if signal_moves else [10] * 5)
+    return rows
+
+
+CFG = {"signals": {"eff_rank_last": -1}, "alpha": 0.5, "far": 0.0, "n_boot": 50, "n_perm": 200, "seed": 0}
+
+
+def test_gate3_passes_when_a_signal_moves_before_collapse():
+    from src.evaluation.earlywarning import evaluate_gate3
+
+    out = evaluate_gate3(_gate_table(), CFG)
+    sig = out["signals"]["eff_rank_last"]
+    assert out["status"] == "passed" and sig["warns"] and sig["early_warning"]["mean_lead"] > 0
+    assert out["alpha_adjusted"] == 0.5
+
+
+def test_gate3_fails_when_the_signal_is_flat_but_collapse_is_there_to_see():
+    from src.evaluation.earlywarning import evaluate_gate3
+
+    out = evaluate_gate3(_gate_table(signal_moves=False), CFG)
+    assert out["status"] == "failed" and not out["signals"]["eff_rank_last"]["warns"]
+
+
+def test_gate3_is_not_evaluable_when_every_trajectory_collapses():
+    from src.evaluation.earlywarning import evaluate_gate3
+
+    rows = _wb(_table("t", 0, [50, 60, 70, 80, 90]), [10, 9, 8, 7, 6])
+    rows += _wb(_table("t", 1, [50.1, 61, 71, 81, 91]), [10, 9, 8, 7, 6])
+    out = evaluate_gate3(rows, CFG)
+    assert out["status"] == "not_evaluable"
+    assert out["signals"]["eff_rank_last"]["reason"] == "no trajectory that never collapses"
+
+
+def test_gate3_without_fresh_signal_values_is_not_evaluable_and_names_what_was_skipped():
+    from src.evaluation.earlywarning import evaluate_gate3
+
+    rows = [{**r, "wb_status": "missing"} for r in _gate_table()]
+    out = evaluate_gate3(rows, CFG)
+    sig = out["signals"]["eff_rank_last"]
+    assert out["status"] == "not_evaluable" and sig["n_trajectories"] == 0 and len(sig["skipped"]) == 4
+
+
+def test_gate3_splits_alpha_across_the_signals_tried():
+    from src.evaluation.earlywarning import evaluate_gate3
+
+    cfg = {**CFG, "alpha": 0.05, "signals": {"eff_rank_last": -1, "anisotropy_last": 1}}
+    rows = [{**r, "wb_anisotropy_last": 0.5} for r in _gate_table()]
+    out = evaluate_gate3(rows, cfg)
+    assert out["alpha_adjusted"] == 0.025
+    assert out["signals"]["eff_rank_last"]["permutation_p"] > 0.025  # 4 trajectories can't reach 0.025
+    assert out["status"] == "failed"

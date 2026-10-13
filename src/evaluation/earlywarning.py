@@ -124,3 +124,36 @@ def evaluate_risk(
         "permutation_p": (at_least + 1) / (n_perm + 1),
         "early_warning": lead_stage_at_far(risks, onsets, far),
     }
+
+
+def evaluate_gate3(table: Sequence[Row], cfg: Mapping[str, Any]) -> dict:
+    """GATE 3 (TRD: "risk model beats a random baseline; lead-time > 0") on the grid.
+
+    ``cfg`` is the config's ``gate3`` section: ``signals`` (white-box signal name
+    -> direction, +1 if it rises as the model degrades, -1 if it falls), ``alpha``,
+    ``far``, ``n_boot``, ``n_perm``, ``seed``. A signal *warns* when its
+    permutation p-value is below ``alpha`` divided by the number of signals
+    (Bonferroni, since several are tried) and its mean lead is above zero. GATE 3
+    passes when any signal warns; it is *not evaluable* when no signal could be
+    evaluated, and fails otherwise. Never passed on missing evidence.
+    """
+    signals = cfg["signals"]
+    adjusted = cfg["alpha"] / len(signals)
+    per_signal: dict[str, dict] = {}
+    for name, direction in signals.items():
+        keys, risks, onsets, skipped = risk_trajectories(table, name, direction)
+        result = (
+            evaluate_risk(risks, onsets, cfg["far"], cfg["n_boot"], cfg["n_perm"], cfg["seed"])
+            if keys
+            else {"status": "not_evaluable", "reason": "no trajectory with fresh values"}
+        )
+        result["n_trajectories"] = len(keys)
+        result["skipped"] = [list(k) for k in skipped]
+        lead = (result.get("early_warning") or {}).get("mean_lead")
+        result["warns"] = bool(
+            result["status"] == "ok" and result["permutation_p"] < adjusted and lead is not None and lead > 0
+        )
+        per_signal[name] = result
+    evaluable = [r for r in per_signal.values() if r["status"] == "ok"]
+    status = "not_evaluable" if not evaluable else "passed" if any(r["warns"] for r in per_signal.values()) else "failed"
+    return {"status": status, "alpha_adjusted": adjusted, "signals": per_signal}
