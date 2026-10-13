@@ -115,6 +115,7 @@ python -m src.finetune.grid --config configs/grid.yaml                 # the ful
 python -m src.finetune.grid --config configs/grid.yaml --summarize-only   # re-apply GATE 2, redraw the figure; trains nothing
 python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near   # redo one type's cells after its generator changed
 python -m src.evaluation.whitebox --config configs/whitebox.yaml   # white-box signals (effective rank, anisotropy, ...) from the kept checkpoints
+python -m src.features.run_table                                    # one CSV row per grid run: outcomes + white-box signals
 ```
 
 GPU work (fine-tuning) runs on free Google Colab / Kaggle notebooks — see
