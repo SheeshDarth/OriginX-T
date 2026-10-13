@@ -187,6 +187,7 @@ def test_gate3_without_fresh_signal_values_is_not_evaluable_and_names_what_was_s
     out = evaluate_gate3(rows, CFG)
     sig = out["signals"]["eff_rank_last"]
     assert out["status"] == "not_evaluable" and sig["n_trajectories"] == 0 and len(sig["skipped"]) == 4
+    assert sig["reason"] == "no trajectory with fresh values"
 
 
 def test_gate3_splits_alpha_across_the_signals_tried():
@@ -213,6 +214,7 @@ def test_cli_reads_both_files_and_writes_the_verdict(tmp_path, capsys):
         ([50.3, 50.4, 57, 61, 67], [10, 9, 6, 5, 3]),
         ([50.1, 50.2, 50.3, 50.2, 50.1], [10] * 5),
         ([50.2, 50.1, 50.2, 50.3, 50.1], [10] * 5),
+        ([50.0, 50.1, 50.0, 50.1, 50.2], [10] * 5),
     ]):
         for r, p, x in zip(RATIOS, ppls, sig):
             cell = f"t_r{r:g}_s{seed}"
@@ -226,7 +228,7 @@ def test_cli_reads_both_files_and_writes_the_verdict(tmp_path, capsys):
     (tmp_path / "c.yaml").write_text(yaml.safe_dump(cfg))
     main(["--config", str(tmp_path / "c.yaml")])
     written = json.loads((tmp_path / "out" / "earlywarning.json").read_text())
-    assert written["status"] == "passed" and written["trajectories"] == 4 and written["never_collapse"] == 2
+    assert written["status"] == "passed" and written["trajectories"] == 5 and written["never_collapse"] == 3
     printed = capsys.readouterr().out
     assert "GATE 3: PASSED" in printed and "eff_rank_last" in printed and "WARNS" in printed
 
@@ -241,3 +243,69 @@ def test_the_shipped_config_is_complete_and_directions_are_signs():
     assert set(g) == {"signals", "alpha", "far", "n_boot", "n_perm", "seed"}
     assert all(d in (1, -1) for d in g["signals"].values())
     assert 0 < g["alpha"] < 1 and 0 <= g["far"] < 1
+
+
+def test_each_type_is_judged_against_its_own_noise_floor():
+    rows = (
+        _table("a", 0, [50.0, 52.0, 52, 52, 52]) + _table("a", 1, [50.5, 50.5, 50.5, 50.5, 50.5])   # spread 0.5
+        + _table("b", 0, [50.0, 52.0, 52, 52, 52]) + _table("b", 1, [55.0, 55.0, 55.0, 55.0, 55.0])  # spread 5
+    )
+    onsets = collapse_onsets(rows)
+    assert onsets[("a", 0)] == 1 and onsets[("b", 0)] is None
+
+
+def test_a_perplexity_drop_below_the_baseline_is_not_a_collapse():
+    rows = _table("a", 0, [50.0, 40.0, 40, 40, 40]) + _table("a", 1, [50.5, 50.5, 50.5, 50.5, 50.5])
+    assert collapse_onsets(rows)[("a", 0)] is None
+
+
+def test_the_permutation_p_value_is_never_zero():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    risks, onsets = _separable()
+    ps = [evaluate_risk(risks, onsets, 0.0, 10, 1, seed)["permutation_p"] for seed in range(10)]
+    assert min(ps) >= 0.5  # (count + 1) / (n_perm + 1) with one shuffle
+
+
+def test_the_permutation_baseline_is_seeded():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    risks = [[0, 3, 0], [0, 1, 0], [0, 2, 0], [0, 2, 0], [0, 3, 0], [0, 1, 0]]
+    onsets = [2, 2, 2, None, None, None]
+    runs = [evaluate_risk(risks, onsets, 0.0, 10, 300, 7)["permutation_p"] for _ in range(3)]
+    assert runs[0] == runs[1] == runs[2]
+    other = evaluate_risk(risks, onsets, 0.0, 10, 300, 8)["permutation_p"]
+    assert other != runs[0]
+
+
+def test_the_false_alarm_rate_given_is_the_one_used():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    # never-collapsers peak at 0, 1, 1; the collapser rises to 1 then 5 before its onset
+    risks = [[0, 1, 5, 9], [0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]
+    onsets = [3, None, None, None]
+    strict = evaluate_risk(risks, onsets, 0.0, 10, 10, 0)["early_warning"]
+    loose = evaluate_risk(risks, onsets, 0.67, 10, 10, 0)["early_warning"]
+    assert strict["threshold"] == 1 and strict["leads"] == [1]
+    assert loose["threshold"] == 0 and loose["leads"] == [2]
+
+
+def test_gate3_needs_the_p_value_strictly_below_the_adjusted_alpha():
+    from src.evaluation.earlywarning import evaluate_gate3
+
+    p = evaluate_gate3(_gate_table(), CFG)["signals"]["eff_rank_last"]["permutation_p"]
+    at = evaluate_gate3(_gate_table(), {**CFG, "alpha": p})
+    assert at["status"] == "failed"
+    above = evaluate_gate3(_gate_table(), {**CFG, "alpha": p * 1.01})
+    assert above["status"] == "passed"
+
+
+def test_gate3_passes_when_any_one_signal_warns_even_if_the_others_do_not():
+    from src.evaluation.earlywarning import evaluate_gate3
+
+    cfg = {**CFG, "signals": {"eff_rank_last": -1, "anisotropy_last": 1}, "alpha": 0.9}
+    rows = [{**r, "wb_anisotropy_last": 0.5} for r in _gate_table()]
+    out = evaluate_gate3(rows, cfg)
+    assert out["signals"]["eff_rank_last"]["warns"] and not out["signals"]["anisotropy_last"]["warns"]
+    assert out["signals"]["anisotropy_last"]["status"] == "ok"
+    assert out["status"] == "passed"
