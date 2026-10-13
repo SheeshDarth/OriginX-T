@@ -13,6 +13,7 @@ from src.evaluation.scoring import (
     ece,
     f1_at,
     interval_coverage,
+    lead_stage_at_far,
     reliability_bins,
     set_coverage,
 )
@@ -208,3 +209,90 @@ def test_coverage_gap_is_signed_against_the_nominal_level():
     assert coverage_gap(0.93, 0.1) == pytest.approx(0.03)
     with pytest.raises(ValueError, match="alpha"):
         coverage_gap(0.9, 0.0)
+
+
+def _runs():
+    # three runs that never collapse (peaks 0.2, 0.4, 0.5) and three that do
+    risks = [
+        [0.1, 0.2, 0.1, 0.1, 0.1],
+        [0.1, 0.4, 0.3, 0.1, 0.1],
+        [0.5, 0.1, 0.1, 0.1, 0.1],
+        [0.1, 0.6, 0.7, 0.9, 0.9],  # alarms at stage 1, collapses at 3 -> lead 2
+        [0.1, 0.1, 0.1, 0.8, 0.9],  # alarms at stage 3, collapses at 4 -> lead 1
+        [0.1, 0.1, 0.1, 0.1, 0.9],  # alarms at the onset itself -> a miss
+    ]
+    onsets = [None, None, None, 3, 4, 4]
+    return risks, onsets
+
+
+def test_lead_stage_sets_the_threshold_on_runs_that_never_collapse():
+    risks, onsets = _runs()
+    out = lead_stage_at_far(risks, onsets, far=0.34)  # one of three false alarms allowed
+    assert out["threshold"] == 0.4 and out["false_alarm_rate"] == pytest.approx(1 / 3)
+    assert out["leads"] == [2, 1] and out["detected"] == 2 and out["n_collapsing"] == 3
+    assert out["detection_rate"] == pytest.approx(2 / 3)
+    assert out["mean_lead"] == 1.5 and out["median_lead"] == 1.5
+
+
+def test_lead_stage_tighter_false_alarm_rate_raises_the_threshold_and_loses_lead():
+    risks, onsets = _runs()
+    loose = lead_stage_at_far(risks, onsets, far=0.34)
+    tight = lead_stage_at_far(risks, onsets, far=0.0)  # none allowed: above the highest peak, 0.5
+    assert tight["threshold"] == 0.5 and tight["false_alarm_rate"] == 0.0
+    assert tight["leads"] == [2, 1]  # 0.6 and 0.8 still clear 0.5
+    assert tight["threshold"] > loose["threshold"]
+    # a noisier never-collapsing run (peak 0.7) pushes the threshold up and costs the lead of 2
+    noisy = lead_stage_at_far(risks + [[0.1, 0.7, 0.1, 0.1, 0.1]], onsets + [None], far=0.0)
+    assert noisy["threshold"] == 0.7 and noisy["leads"] == [1]
+
+
+def test_lead_stage_alarm_at_or_after_onset_is_a_miss_not_a_zero_lead():
+    risks, onsets = _runs()
+    out = lead_stage_at_far(risks, onsets, far=0.34)
+    assert 0 not in out["leads"] and out["detected"] == 2
+    none = lead_stage_at_far(risks[:3] + [[0.1, 0.1, 0.1, 0.1, 0.9]], [None, None, None, 4], far=0.0)
+    assert none["leads"] == [] and none["mean_lead"] is None and none["median_lead"] is None
+
+
+def test_lead_stage_uses_the_first_alarm_and_a_run_that_never_alarms_is_a_miss():
+    risks = [[0.1, 0.1], [0.9, 0.1, 0.9, 0.9, 0.9], [0.1, 0.1, 0.1, 0.1, 0.1]]
+    out = lead_stage_at_far(risks, [None, 4, 3], far=0.0)
+    assert out["leads"] == [4] and out["detection_rate"] == 0.5  # alarms at stage 0, collapses at 4
+
+
+def test_lead_stage_median_of_an_even_and_an_odd_number_of_leads():
+    neg = [[0.0, 0.0, 0.0, 0.0]]
+    pos = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]  # alarm at 0, 1, 2; onset 3 -> leads 3, 2, 1
+    out = lead_stage_at_far(neg + pos, [None, 3, 3, 3], far=0.0)
+    assert sorted(out["leads"]) == [1, 2, 3] and out["median_lead"] == 2
+    out = lead_stage_at_far(neg + pos[:2], [None, 3, 3], far=0.0)
+    assert out["median_lead"] == 2.5
+
+
+def test_lead_stage_ties_among_never_collapsing_runs_cannot_overshoot_the_rate():
+    risks = [[0.3]] * 4 + [[0.1, 0.9]]
+    out = lead_stage_at_far(risks, [None] * 4 + [1], far=0.25)
+    assert out["false_alarm_rate"] == 0.0 and out["threshold"] == 0.3  # all four tie, none strictly above
+
+
+def test_lead_stage_a_run_cannot_collapse_before_it_could_be_warned():
+    out = lead_stage_at_far([[0.0, 0.0], [0.9, 0.9]], [None, 0], far=0.0)
+    assert out["leads"] == [] and out["detection_rate"] == 0.0
+
+
+def test_lead_stage_refuses_input_it_cannot_score():
+    ok = [[0.1, 0.2], [0.1, 0.9]]
+    with pytest.raises(ValueError, match="differ in length"):
+        lead_stage_at_far(ok, [None])
+    with pytest.raises(ValueError, match="far"):
+        lead_stage_at_far(ok, [None, 1], far=1.0)
+    with pytest.raises(ValueError, match="outside"):
+        lead_stage_at_far(ok, [None, 2])
+    with pytest.raises(ValueError, match="at least one stage"):
+        lead_stage_at_far([[], [0.1]], [None, 0])
+    with pytest.raises(ValueError, match="NaN"):
+        lead_stage_at_far([[0.1], [float("nan"), 0.2]], [None, 1])
+    with pytest.raises(ValueError, match="one that never does"):
+        lead_stage_at_far(ok, [0, 1])
+    with pytest.raises(ValueError, match="one that never does"):
+        lead_stage_at_far(ok, [None, None])

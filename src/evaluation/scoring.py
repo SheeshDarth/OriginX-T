@@ -198,3 +198,62 @@ def coverage_gap(coverage: float, alpha: float) -> float:
     if not 0.0 < alpha < 1.0:
         raise ValueError("alpha must be in (0, 1)")
     return coverage - (1.0 - alpha)
+
+
+def lead_stage_at_far(
+    risks: Sequence[Sequence[float]],
+    onsets: Sequence[int | None],
+    far: float = 0.05,
+) -> dict:
+    """Early-warning lead time at a fixed false-alarm rate.
+
+    ``risks[i]`` is run *i*'s risk score at each stage; ``onsets[i]`` is the stage
+    at which it collapsed, or ``None`` for a run that never does. An alarm is the
+    first stage whose risk is strictly above a threshold.
+
+    The threshold is set on the runs that never collapse alone: the lowest value
+    at which at most ``far`` of them ever raise an alarm. Then, for each run that
+    does collapse, the lead is ``onset - first alarm stage``; an alarm at or after
+    the onset is a miss, not a lead of zero. Returns the threshold, the false
+    alarm rate actually reached (ties can leave it below ``far``), the detection
+    rate, each detected run's lead, and their mean and median.
+    """
+    if len(risks) != len(onsets):
+        raise ValueError(f"risks ({len(risks)}) and onsets ({len(onsets)}) differ in length")
+    if not 0.0 <= far < 1.0:
+        raise ValueError("far must be in [0, 1)")
+    for r, o in zip(risks, onsets):
+        if not r:
+            raise ValueError("every run needs at least one stage")
+        if any(math.isnan(x) for x in r):
+            raise ValueError("risk contains NaN")
+        if o is not None and not 0 <= o < len(r):
+            raise ValueError(f"onset {o} is outside the run's {len(r)} stages")
+    neg_peaks = sorted((max(r) for r, o in zip(risks, onsets) if o is None), reverse=True)
+    positives = [(r, o) for r, o in zip(risks, onsets) if o is not None]
+    if not neg_peaks or not positives:
+        raise ValueError("need at least one run that collapses and one that never does")
+
+    allowed = int(math.floor(far * len(neg_peaks) + 1e-9))
+    threshold = neg_peaks[allowed] if allowed < len(neg_peaks) else -math.inf
+    false_alarms = sum(1 for p in neg_peaks if p > threshold)
+
+    leads = []
+    for r, o in positives:
+        first = next((k for k, x in enumerate(r) if x > threshold), None)
+        if first is not None and first < o:
+            leads.append(o - first)
+    mid = sorted(leads)
+    median = None
+    if mid:
+        median = mid[len(mid) // 2] if len(mid) % 2 else (mid[len(mid) // 2 - 1] + mid[len(mid) // 2]) / 2
+    return {
+        "threshold": threshold,
+        "false_alarm_rate": false_alarms / len(neg_peaks),
+        "n_collapsing": len(positives),
+        "detected": len(leads),
+        "detection_rate": len(leads) / len(positives),
+        "leads": leads,
+        "mean_lead": sum(leads) / len(leads) if leads else None,
+        "median_lead": median,
+    }
