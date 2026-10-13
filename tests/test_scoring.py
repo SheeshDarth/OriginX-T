@@ -9,9 +9,12 @@ from src.evaluation.scoring import (
     auprc,
     auroc,
     bootstrap_ci,
+    coverage_gap,
     ece,
     f1_at,
+    interval_coverage,
     reliability_bins,
+    set_coverage,
 )
 
 
@@ -171,3 +174,37 @@ def test_calibration_refuses_bad_input():
         ece([0, 1], [0.5, 0.5], n_bins=0)
     with pytest.raises(ValueError, match="differ in length"):
         reliability_bins([0, 1], [0.5])
+
+
+def test_interval_coverage_counts_both_ends_and_reports_the_width():
+    out = interval_coverage([1.0, 2.0, 5.0, 9.0], [(0, 1), (2, 3), (0, 4), (8, 10)])
+    assert out["coverage"] == 0.75  # 1 on the upper end, 2 on the lower end, 5 outside
+    assert out["mean_width"] == pytest.approx((1 + 1 + 4 + 2) / 4)
+
+
+def test_interval_coverage_refuses_inverted_intervals_and_mismatches():
+    with pytest.raises(ValueError, match="lo <= hi"):
+        interval_coverage([1.0], [(2.0, 1.0)])
+    with pytest.raises(ValueError, match="lo <= hi"):
+        interval_coverage([1.0], [(float("nan"), 1.0)])
+    with pytest.raises(ValueError, match="differ in length"):
+        interval_coverage([1.0, 2.0], [(0, 3)])
+    with pytest.raises(ValueError, match="no examples"):
+        interval_coverage([], [])
+
+
+def test_set_coverage_counts_an_empty_set_as_a_miss_and_in_the_size():
+    out = set_coverage(["a", "b", "c", "a"], [{"a"}, {"a", "b"}, set(), {"b"}])
+    assert out["coverage"] == 0.5
+    assert out["mean_size"] == pytest.approx((1 + 2 + 0 + 1) / 4)
+    with pytest.raises(ValueError, match="differ in length"):
+        set_coverage(["a"], [])
+    with pytest.raises(ValueError, match="no examples"):
+        set_coverage([], [])
+
+
+def test_coverage_gap_is_signed_against_the_nominal_level():
+    assert coverage_gap(0.85, 0.1) == pytest.approx(-0.05)
+    assert coverage_gap(0.93, 0.1) == pytest.approx(0.03)
+    with pytest.raises(ValueError, match="alpha"):
+        coverage_gap(0.9, 0.0)

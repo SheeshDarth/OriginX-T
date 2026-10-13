@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 
 
 def _check(labels: Sequence[int], scores: Sequence[float], both_classes: bool = True) -> None:
@@ -160,3 +160,41 @@ def ece(labels: Sequence[int], probs: Sequence[float], n_bins: int = 10) -> floa
     bins = reliability_bins(labels, probs, n_bins)
     total = sum(b["n"] for b in bins)
     return sum(b["n"] / total * abs(b["accuracy"] - b["confidence"]) for b in bins)
+
+
+def interval_coverage(
+    truths: Sequence[float], intervals: Sequence[tuple[float, float]]
+) -> dict:
+    """Share of truths inside their (lo, hi) interval, ends included, and the mean width."""
+    if len(truths) != len(intervals):
+        raise ValueError(f"truths ({len(truths)}) and intervals ({len(intervals)}) differ in length")
+    if not truths:
+        raise ValueError("no examples")
+    if any(lo > hi or math.isnan(lo) or math.isnan(hi) for lo, hi in intervals):
+        raise ValueError("every interval needs lo <= hi")
+    hits = sum(1 for y, (lo, hi) in zip(truths, intervals) if lo <= y <= hi)
+    return {
+        "coverage": hits / len(truths),
+        "mean_width": sum(hi - lo for lo, hi in intervals) / len(intervals),
+    }
+
+
+def set_coverage(truths: Sequence, sets: Sequence[Collection]) -> dict:
+    """Share of truths inside their prediction set, and the mean set size.
+
+    An empty set never covers, and is counted in the size, so a method cannot
+    look efficient by abstaining.
+    """
+    if len(truths) != len(sets):
+        raise ValueError(f"truths ({len(truths)}) and sets ({len(sets)}) differ in length")
+    if not truths:
+        raise ValueError("no examples")
+    hits = sum(1 for y, s in zip(truths, sets) if y in s)
+    return {"coverage": hits / len(truths), "mean_size": sum(len(s) for s in sets) / len(sets)}
+
+
+def coverage_gap(coverage: float, alpha: float) -> float:
+    """Observed coverage minus the nominal 1 - alpha. Negative means under-covering."""
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
+    return coverage - (1.0 - alpha)
