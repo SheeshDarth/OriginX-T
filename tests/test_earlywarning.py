@@ -198,3 +198,46 @@ def test_gate3_splits_alpha_across_the_signals_tried():
     assert out["alpha_adjusted"] == 0.025
     assert out["signals"]["eff_rank_last"]["permutation_p"] > 0.025  # 4 trajectories can't reach 0.025
     assert out["status"] == "failed"
+
+
+def test_cli_reads_both_files_and_writes_the_verdict(tmp_path, capsys):
+    import json
+
+    import yaml
+
+    from src.evaluation.earlywarning import main
+
+    grid, wb = [], []
+    for seed, (ppls, sig) in enumerate([
+        ([50.0, 50.2, 56, 60, 66], [10, 8, 6, 5, 4]),
+        ([50.3, 50.4, 57, 61, 67], [10, 9, 6, 5, 3]),
+        ([50.1, 50.2, 50.3, 50.2, 50.1], [10] * 5),
+        ([50.2, 50.1, 50.2, 50.3, 50.1], [10] * 5),
+    ]):
+        for r, p, x in zip(RATIOS, ppls, sig):
+            cell = f"t_r{r:g}_s{seed}"
+            grid.append({"cell": cell, "type": "t", "ratio": r, "seed": seed, "holdout_ppl": p,
+                         "benchmark_ppl": 1.0, "distinct_1": 0.1, "distinct_2": 0.5})
+            wb.append({"cell": cell, "kind": "cell", "grid_holdout_ppl": p, "headline": {"eff_rank_last": x}})
+    (tmp_path / "g.jsonl").write_text("".join(json.dumps(r) + "\n" for r in grid))
+    (tmp_path / "w.jsonl").write_text("".join(json.dumps(r) + "\n" for r in wb))
+    cfg = {"grid_results": str(tmp_path / "g.jsonl"), "whitebox_results": str(tmp_path / "w.jsonl"),
+           "output_dir": str(tmp_path / "out"), "gate3": CFG}
+    (tmp_path / "c.yaml").write_text(yaml.safe_dump(cfg))
+    main(["--config", str(tmp_path / "c.yaml")])
+    written = json.loads((tmp_path / "out" / "earlywarning.json").read_text())
+    assert written["status"] == "passed" and written["trajectories"] == 4 and written["never_collapse"] == 2
+    printed = capsys.readouterr().out
+    assert "GATE 3: PASSED" in printed and "eff_rank_last" in printed and "WARNS" in printed
+
+
+def test_the_shipped_config_is_complete_and_directions_are_signs():
+    from pathlib import Path
+
+    import yaml
+
+    cfg = yaml.safe_load(Path("configs/earlywarning.yaml").read_text())
+    g = cfg["gate3"]
+    assert set(g) == {"signals", "alpha", "far", "n_boot", "n_perm", "seed"}
+    assert all(d in (1, -1) for d in g["signals"].values())
+    assert 0 < g["alpha"] < 1 and 0 <= g["far"] < 1

@@ -157,3 +157,41 @@ def evaluate_gate3(table: Sequence[Row], cfg: Mapping[str, Any]) -> dict:
     evaluable = [r for r in per_signal.values() if r["status"] == "ok"]
     status = "not_evaluable" if not evaluable else "passed" if any(r["warns"] for r in per_signal.values()) else "failed"
     return {"status": status, "alpha_adjusted": adjusted, "signals": per_signal}
+
+
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+    import json
+    from pathlib import Path
+
+    import yaml
+
+    from ..features.run_table import build_run_table
+
+    p = argparse.ArgumentParser(description="GATE 3 early-warning evaluation on the grid.")
+    p.add_argument("--config", default="configs/earlywarning.yaml")
+    args = p.parse_args(argv)
+    cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
+    table = build_run_table(cfg["grid_results"], cfg["whitebox_results"])
+    verdict = evaluate_gate3(table, cfg["gate3"])
+    onsets = collapse_onsets(table)
+    verdict["trajectories"] = len(onsets)
+    verdict["never_collapse"] = sum(1 for o in onsets.values() if o is None)
+    out = Path(cfg["output_dir"]) / "earlywarning.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(verdict, indent=2, sort_keys=True), encoding="utf-8")
+
+    print(f"{verdict['trajectories']} trajectories, {verdict['never_collapse']} never collapse")
+    for name, r in verdict["signals"].items():
+        if r["status"] != "ok":
+            print(f"  {name:20s} not evaluable: {r.get('reason')}")
+        else:
+            lead = r["early_warning"]["mean_lead"]
+            print(f"  {name:20s} AUROC {r['auroc']:.2f} {r['auroc_ci'][0]:.2f}-{r['auroc_ci'][1]:.2f}  "
+                  f"p={r['permutation_p']:.4f}  lead={'-' if lead is None else f'{lead:.2f}'}  "
+                  f"{'WARNS' if r['warns'] else 'no'}")
+    print(f"GATE 3: {verdict['status'].upper().replace('_', ' ')}  -> {out}")
+
+
+if __name__ == "__main__":
+    main()
