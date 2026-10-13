@@ -77,3 +77,50 @@ def risk_trajectories(
         risks.append([direction * (v - values[0]) for v in values])
         ons.append(onsets[key])
     return keys, risks, ons, skipped
+
+
+def evaluate_risk(
+    risks: Sequence[Sequence[float]],
+    onsets: Sequence[int | None],
+    far: float,
+    n_boot: int,
+    n_perm: int,
+    seed: int,
+) -> dict:
+    """How well one risk signal warns of collapse, with a random baseline.
+
+    Run-level: each trajectory's score is its highest risk *before* its onset (or
+    anywhere, if it never collapses), so a collapsing run cannot score from the
+    collapse itself; AUROC of that score against "does it collapse", with a
+    bootstrap interval and a permutation p-value (the share of shuffled labelings
+    that do at least as well; 1 / (n_perm + 1) at best). Early warning: the lead
+    stage at false-alarm rate ``far``. With no collapsing or no never-collapsing
+    trajectory there is nothing to separate, and the result says so instead of
+    returning a number.
+    """
+    from random import Random
+
+    from .scoring import auroc, bootstrap_ci, lead_stage_at_far
+
+    labels = [0 if o is None else 1 for o in onsets]
+    n_pos, n_neg = sum(labels), len(labels) - sum(labels)
+    if n_pos == 0 or n_neg == 0:
+        which = "no collapsing trajectory" if n_pos == 0 else "no trajectory that never collapses"
+        return {"status": "not_evaluable", "reason": which, "n_collapsing": n_pos, "n_never": n_neg}
+    peaks = [max(r[: max(o, 1)] if o is not None else r) for r, o in zip(risks, onsets)]
+    point, lo, hi = bootstrap_ci(auroc, labels, peaks, n_boot=n_boot, seed=seed)
+    rng = Random(seed)
+    shuffled = list(labels)
+    at_least = 0
+    for _ in range(n_perm):
+        rng.shuffle(shuffled)
+        at_least += auroc(shuffled, peaks) >= point
+    return {
+        "status": "ok",
+        "n_collapsing": n_pos,
+        "n_never": n_neg,
+        "auroc": point,
+        "auroc_ci": [lo, hi],
+        "permutation_p": (at_least + 1) / (n_perm + 1),
+        "early_warning": lead_stage_at_far(risks, onsets, far),
+    }

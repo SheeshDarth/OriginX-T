@@ -82,3 +82,56 @@ def test_direction_must_be_plus_or_minus_one():
 
     with pytest.raises(ValueError, match="direction"):
         risk_trajectories([], "eff_rank_last", direction=0)
+
+
+def _separable():
+    # three collapsers (onset 3) whose risk climbs before it; three never-collapsers that stay flat
+    risks = [[0, 2, 5, 9], [0, 3, 6, 9], [0, 4, 7, 9], [0, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0]]
+    return risks, [3, 3, 3, None, None, None]
+
+
+def test_a_signal_that_climbs_before_collapse_beats_the_random_baseline():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    risks, onsets = _separable()
+    out = evaluate_risk(risks, onsets, far=0.0, n_boot=200, n_perm=500, seed=0)
+    assert out["status"] == "ok" and out["n_collapsing"] == 3 and out["n_never"] == 3
+    assert out["auroc"] == 1.0
+    assert out["permutation_p"] == pytest.approx(1 / 20, abs=0.04)  # 1 of C(6,3)=20 labelings is perfect
+    assert out["early_warning"]["detected"] == 3 and out["early_warning"]["mean_lead"] > 0
+
+
+def test_risk_from_the_collapse_itself_does_not_count():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    # the signal only moves at/after the onset: nothing before it can warn
+    risks = [[0, 0, 9, 9], [0, 0, 9, 9], [0, 0, 0, 0], [0, 0, 0, 0]]
+    out = evaluate_risk(risks, [2, 2, None, None], far=0.0, n_boot=100, n_perm=100, seed=0)
+    assert out["auroc"] == 0.5
+    assert out["early_warning"]["detected"] == 0
+
+
+def test_a_signal_unrelated_to_collapse_is_not_significant():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    risks = [[0, 3], [0, 1], [0, 2], [0, 2], [0, 3], [0, 1]]
+    out = evaluate_risk(risks, [1, 1, 1, None, None, None], far=0.0, n_boot=100, n_perm=400, seed=1)
+    assert out["permutation_p"] > 0.2
+
+
+def test_all_trajectories_collapsing_is_not_evaluable_not_an_error():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    out = evaluate_risk([[0, 1], [0, 2]], [1, 1], far=0.05, n_boot=10, n_perm=10, seed=0)
+    assert out == {"status": "not_evaluable", "reason": "no trajectory that never collapses",
+                   "n_collapsing": 2, "n_never": 0}
+    out = evaluate_risk([[0, 1]], [None], far=0.05, n_boot=10, n_perm=10, seed=0)
+    assert out["reason"] == "no collapsing trajectory"
+
+
+def test_evaluation_is_reproducible_for_a_seed():
+    from src.evaluation.earlywarning import evaluate_risk
+
+    risks, onsets = _separable()
+    a = evaluate_risk(risks, onsets, far=0.0, n_boot=100, n_perm=100, seed=5)
+    assert a == evaluate_risk(risks, onsets, far=0.0, n_boot=100, n_perm=100, seed=5)
