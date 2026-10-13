@@ -5,7 +5,14 @@ import math
 
 import pytest
 
-from src.evaluation.scoring import auprc, auroc, bootstrap_ci, f1_at
+from src.evaluation.scoring import (
+    auprc,
+    auroc,
+    bootstrap_ci,
+    ece,
+    f1_at,
+    reliability_bins,
+)
 
 
 def test_auroc_perfect_inverted_and_constant():
@@ -127,3 +134,40 @@ def test_bootstrap_rejects_bad_arguments():
         bootstrap_ci(_mean, [1.0, 2.0], n_boot=0)
     with pytest.raises(ValueError, match="alpha"):
         bootstrap_ci(_mean, [1.0, 2.0], alpha=1.0)
+
+
+def test_reliability_bins_hand_computed_and_one_goes_in_the_last_bin():
+    labels = [0, 1, 1, 0, 1]
+    probs = [0.05, 0.15, 0.1, 0.95, 1.0]
+    bins = reliability_bins(labels, probs, n_bins=10)
+    assert [(b["lo"], b["n"]) for b in bins] == [(0.0, 1), (0.1, 2), (0.9, 2)]
+    assert bins[1]["confidence"] == pytest.approx(0.125) and bins[1]["accuracy"] == 1.0
+    assert bins[2]["hi"] == 1.0 and bins[2]["accuracy"] == 0.5
+    assert sum(b["n"] for b in bins) == len(labels)
+
+
+def test_ece_is_zero_when_calibrated_and_the_gap_when_confidently_wrong():
+    assert ece([1, 1, 1, 0], [0.75] * 4) == 0.0
+    assert ece([0, 0, 0, 0], [1.0] * 4) == 1.0
+    assert ece([1, 1, 1, 1], [0.0] * 4) == 1.0
+
+
+def test_ece_weights_bins_by_their_size():
+    # 3 examples near 0.9 with accuracy 1.0 (gap 0.1), 1 near 0.1 with accuracy 1.0 (gap 0.9)
+    labels, probs = [1, 1, 1, 1], [0.9, 0.9, 0.9, 0.1]
+    assert ece(labels, probs, n_bins=10) == pytest.approx(0.75 * 0.1 + 0.25 * 0.9)
+
+
+def test_ece_depends_on_the_binning_only_through_the_bins():
+    labels, probs = [1, 0, 1, 0], [0.6, 0.6, 0.4, 0.4]
+    assert ece(labels, probs, n_bins=1) == pytest.approx(0.0)  # mean 0.5, rate 0.5
+    assert ece(labels, probs, n_bins=10) == pytest.approx(0.1)  # 0.6 -> 0.5, 0.4 -> 0.5
+
+
+def test_calibration_refuses_bad_input():
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        ece([0, 1], [0.5, 1.2])
+    with pytest.raises(ValueError, match="n_bins"):
+        ece([0, 1], [0.5, 0.5], n_bins=0)
+    with pytest.raises(ValueError, match="differ in length"):
+        reliability_bins([0, 1], [0.5])

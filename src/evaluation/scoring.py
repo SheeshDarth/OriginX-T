@@ -123,3 +123,40 @@ def bootstrap_ci(
     lo = stats[min(n_boot - 1, int(math.floor(alpha / 2 * n_boot)))]
     hi = stats[min(n_boot - 1, int(math.ceil((1 - alpha / 2) * n_boot)) - 1)]
     return point, lo, hi
+
+
+def reliability_bins(
+    labels: Sequence[int], probs: Sequence[float], n_bins: int = 10
+) -> list[dict]:
+    """Equal-width reliability table over [0, 1]; empty bins are left out.
+
+    Each row: ``lo``, ``hi``, ``n``, ``confidence`` (mean predicted probability)
+    and ``accuracy`` (observed positive rate). A probability of exactly 1.0 goes
+    in the last bin. This is what a reliability diagram plots.
+    """
+    _check(labels, probs, both_classes=False)
+    if n_bins < 1:
+        raise ValueError("n_bins must be at least 1")
+    if any(not 0.0 <= p <= 1.0 for p in probs):
+        raise ValueError("probabilities must be in [0, 1]")
+    members: list[list[int]] = [[] for _ in range(n_bins)]
+    for i, p in enumerate(probs):
+        members[min(int(p * n_bins), n_bins - 1)].append(i)
+    return [
+        {
+            "lo": b / n_bins,
+            "hi": (b + 1) / n_bins,
+            "n": len(ids),
+            "confidence": sum(probs[i] for i in ids) / len(ids),
+            "accuracy": sum(labels[i] for i in ids) / len(ids),
+        }
+        for b, ids in enumerate(members)
+        if ids
+    ]
+
+
+def ece(labels: Sequence[int], probs: Sequence[float], n_bins: int = 10) -> float:
+    """Expected calibration error: bin-size-weighted |accuracy - confidence|."""
+    bins = reliability_bins(labels, probs, n_bins)
+    total = sum(b["n"] for b in bins)
+    return sum(b["n"] / total * abs(b["accuracy"] - b["confidence"]) for b in bins)
