@@ -296,3 +296,32 @@ def test_lead_stage_refuses_input_it_cannot_score():
         lead_stage_at_far(ok, [0, 1])
     with pytest.raises(ValueError, match="one that never does"):
         lead_stage_at_far(ok, [None, None])
+
+
+def test_bootstrap_interval_ends_are_the_alpha_percentiles_of_the_resampled_metric():
+    calls = []
+
+    def counting(values):
+        calls.append(1)
+        return float(len(calls) - 1)  # the point estimate is 0, then 1, 2, ..., 100 for the draws
+
+    point, lo, hi = bootstrap_ci(counting, [1.0, 2.0, 3.0], n_boot=100, alpha=0.1)
+    assert point == 0.0
+    assert (lo, hi) == (6.0, 95.0)  # the 6th and 95th of the 100 draws: 5% in each tail
+
+
+def test_bootstrap_gives_up_only_when_more_draws_are_refused_than_kept():
+    def refusing(times):
+        calls = []
+
+        def metric(values):
+            calls.append(1)
+            if 1 < len(calls) <= 1 + times:  # the first call is the point estimate
+                raise ValueError("refused")
+            return 1.0
+
+        return metric
+
+    assert bootstrap_ci(refusing(100), [1.0, 2.0], n_boot=100)[0] == 1.0  # 100 refused, 100 kept
+    with pytest.raises(ValueError, match="could not be scored"):
+        bootstrap_ci(refusing(101), [1.0, 2.0], n_boot=100)
