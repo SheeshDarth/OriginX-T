@@ -143,7 +143,7 @@ never re-extract. Extra models are a gated robustness check only.
 |------|-----------|
 | GATE 0 | Collapse reproducible on a tiny model? If not, pivot to static contamination-detection framing. |
 | GATE 1 | Feature suite + static baseline runs cleanly on >= 2 datasets. |
-| GATE 2 | >= 1 contamination setting causes measurable degradation. |
+| GATE 2 | Collapse is measurable and dose-dependent, on a rule fixed before the full grid's results were seen (`gate:` in `configs/grid.yaml`, applied by `src/finetune/grid.py`). A collapse type (synthetic, recursive, paraphrased) *degrades* when (a) its mean hidden-holdout perplexity across seeds is non-decreasing over the contamination ratios, tolerating a relative drop of at most 0.5% between neighbouring ratios, and (b) at ratio 0.25 every seed is above its own ratio-0 baseline by more than the spread (max - min) of the baselines across seeds. GATE 2 passes when every collapse type degrades. It is *not evaluable*, never passed, while any grid cell is missing. `benchmark_near` is reported (change in mean benchmark-item perplexity against ratio 0; negative means memorisation), not gated. |
 | GATE 3 | Risk model beats a random baseline; lead-time > 0. |
 
 ## 12. Repository structure
