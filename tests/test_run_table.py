@@ -67,3 +67,20 @@ def test_a_missing_baseline_leaves_the_excess_empty(tmp_path):
     grid = _write(tmp_path / "g.jsonl", [_grid_row("synthetic", 0.5, 0, 60.0)])
     row = build_run_table(grid, tmp_path / "w.jsonl")[0]
     assert row["baseline_ppl"] is None and row["ppl_excess"] is None
+
+
+def test_csv_has_the_union_of_columns_and_blanks_where_a_row_has_none(tmp_path, capsys):
+    import csv
+
+    from src.features.run_table import main
+
+    r0, r1 = _grid_row("synthetic", 0.0, 0, 50.0), _grid_row("synthetic", 0.5, 0, 60.0)
+    grid = _write(tmp_path / "g.jsonl", [r0, r1])
+    wb = _write(tmp_path / "w.jsonl", [_wb_row(r0)])
+    out = tmp_path / "out" / "t.csv"
+    main(["--grid", str(grid), "--whitebox", str(wb), "--out", str(out)])
+    rows = list(csv.DictReader(out.open()))
+    assert [r["wb_status"] for r in rows] == ["fresh", "missing"]
+    assert rows[0]["wb_eff_rank_last"] == "12.0" and rows[1]["wb_eff_rank_last"] == ""
+    printed = capsys.readouterr().out
+    assert "2 runs" in printed and "'fresh': 1" in printed and "'missing': 1" in printed

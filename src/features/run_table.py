@@ -51,3 +51,36 @@ def build_run_table(grid_path: str | Path, whitebox_path: str | Path) -> list[di
             row.update({f"wb_{k}": v for k, v in w["headline"].items()})
         table.append(row)
     return table
+
+
+def write_csv(table: list[dict[str, Any]], path: str | Path) -> None:
+    """Write the table as CSV. Columns are the union over rows (stale and missing rows have fewer)."""
+    import csv
+
+    columns: list[str] = []
+    for row in table:
+        columns += [k for k in row if k not in columns]
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columns, restval="")
+        writer.writeheader()
+        writer.writerows(table)
+
+
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--grid", default="reports/grid/results.jsonl")
+    p.add_argument("--whitebox", default="reports/grid/whitebox.jsonl")
+    p.add_argument("--out", default="reports/grid/run_table.csv")
+    args = p.parse_args(argv)
+    table = build_run_table(args.grid, args.whitebox)
+    write_csv(table, args.out)
+    counts = {s: sum(1 for r in table if r["wb_status"] == s) for s in ("fresh", "stale", "missing")}
+    print(f"{len(table)} runs -> {args.out}  (white-box: {counts})")
+
+
+if __name__ == "__main__":
+    main()
