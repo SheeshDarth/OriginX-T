@@ -39,3 +39,4 @@ reports/**/*.bak-*
 dashboard/web/node_modules/
 dashboard/web/dist/
 dashboard/web/*.tsbuildinfo
+dashboard/web/.vite/
