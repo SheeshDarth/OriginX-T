@@ -1,7 +1,7 @@
 """Audit a dataset before fine-tuning on it: the product's core question (HANDBOOK §1, §8.6 Audit).
 
     python -m src.risk.audit my_data.jsonl [--model reports/risk/model.json]
-                             [--benchmark benchmark_items.jsonl] [--out audit.json]
+                             [--benchmark items.jsonl | --grid configs/grid.yaml] [--out audit.json]
 
 Steps: load the JSONL (any shape ``src.ingestion.loaders`` accepts), turn each record
 into the text the model would train on, compute the same feature families as the
@@ -86,10 +86,22 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("dataset")
     p.add_argument("--model", default="reports/risk/model.json")
     p.add_argument("--benchmark", help="JSONL of benchmark items to check for leaks")
+    p.add_argument("--grid", help="or: use the benchmark items this grid config leaked and scored (e.g. configs/grid.yaml)")
     p.add_argument("--out", help="write the report here (default: stdout)")
     args = p.parse_args(argv)
     samples = load_dataset(args.dataset)
     bench = [s.response for s in load_dataset(args.benchmark)] if args.benchmark else []
+    if args.grid:
+        import random
+
+        import yaml
+
+        from ..finetune.collapse import _pick
+
+        d = yaml.safe_load(Path(args.grid).read_text(encoding="utf-8"))["data"]
+        # the same draw as grid._train_all, so "leak" means a leak of what the grid measured
+        bench = [s.response for s in _pick(load_dataset(d["benchmark"]), d["n_benchmark"], d["min_words"],
+                                           d["max_words"], random.Random("benchmark"))]
     deployed = json.loads(Path(args.model).read_text(encoding="utf-8"))
     report = audit([training_text(s) for s in samples], [s.sample_id for s in samples], deployed, bench)
     text = json.dumps(report, indent=2) + "\n"
