@@ -643,8 +643,10 @@ X2 subset.** Always state the expected runtime when booking.
   shared drive or an external disk. Verify with the white-box config's weights-hash check.
 - Normalized corpora and holdouts *are* deterministic: regenerate them locally (§12.1), then
   confirm `check_leakage` prints OK.
-- Pin library versions at CP0: `pip freeze > requirements.lock.txt` from Vishnu's environment,
-  and use it on Siddharth's GPU machine.
+- Library versions are pinned in `requirements.lock.txt` (from Vishnu's environment, which ran
+  the WikiText grid). Install from it on every machine that produces results, including
+  Siddharth's GPU machine: `pip install -r requirements.lock.txt` (README "Getting started").
+  A PR that adds a dependency regenerates the lock.
 
 ---
 
