@@ -1,0 +1,62 @@
+{
+  "alpha_adjusted": 0.008333333333333333,
+  "never_collapse": 0,
+  "signals": {
+    "anisotropy_last": {
+      "n_collapsing": 12,
+      "n_never": 0,
+      "n_trajectories": 12,
+      "reason": "no trajectory that never collapses",
+      "skipped": [],
+      "status": "not_evaluable",
+      "warns": false
+    },
+    "dead_fraction_mean": {
+      "n_collapsing": 12,
+      "n_never": 0,
+      "n_trajectories": 12,
+      "reason": "no trajectory that never collapses",
+      "skipped": [],
+      "status": "not_evaluable",
+      "warns": false
+    },
+    "delta_rel_norm": {
+      "n_collapsing": 12,
+      "n_never": 0,
+      "n_trajectories": 12,
+      "reason": "no trajectory that never collapses",
+      "skipped": [],
+      "status": "not_evaluable",
+      "warns": false
+    },
+    "eff_rank_last": {
+      "n_collapsing": 12,
+      "n_never": 0,
+      "n_trajectories": 12,
+      "reason": "no trajectory that never collapses",
+      "skipped": [],
+      "status": "not_evaluable",
+      "warns": false
+    },
+    "part_ratio_last": {
+      "n_collapsing": 12,
+      "n_never": 0,
+      "n_trajectories": 12,
+      "reason": "no trajectory that never collapses",
+      "skipped": [],
+      "status": "not_evaluable",
+      "warns": false
+    },
+    "stable_rank_attn": {
+      "n_collapsing": 12,
+      "n_never": 0,
+      "n_trajectories": 12,
+      "reason": "no trajectory that never collapses",
+      "skipped": [],
+      "status": "not_evaluable",
+      "warns": false
+    }
+  },
+  "status": "not_evaluable",
+  "trajectories": 12
+}
