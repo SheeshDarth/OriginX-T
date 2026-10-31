@@ -183,9 +183,12 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("--out-dir", default="reports/risk")
     args = p.parse_args(argv)
     rows = [r for d in args.datasets for r in load_rows(d, Path(args.features_dir), Path(grids[d]))]
+    from .baselines import baseline_report, gate_1
+
     preds = leave_one_out(rows, "type")
     report: dict[str, Any] = {"model": MODEL, "label": "D4 default (HANDBOOK §13)", "features": feature_columns(rows),
-                              "leave_one_type_out": evaluate(preds)}
+                              "leave_one_type_out": evaluate(preds), "baselines": baseline_report(rows, preds)}
+    report["gate_1"] = gate_1([r["dataset"] for r in rows], bool(report["baselines"]["single_feature_auroc"]))
     if len(args.datasets) > 1:
         lodo = leave_one_out(rows, "dataset")
         report["leave_one_dataset_out"] = evaluate(lodo)
