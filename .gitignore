@@ -38,3 +38,4 @@ reports/**/*.bak-*
 # Web UI build output
 dashboard/web/node_modules/
 dashboard/web/dist/
+dashboard/web/*.tsbuildinfo
