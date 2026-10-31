@@ -54,10 +54,20 @@ def test_predictions_do_not_depend_on_a_feature_s_units():
 
 def test_leave_one_type_out_never_tests_on_training_rows_or_shared_ratio_0():
     rows = _rows() + [{**_rows()[0], "cell": "synthetic_r0_s0", "ratio": 0.0, "label": 0}]
-    preds = leave_one_out(rows, "type")
+    preds = leave_one_out(rows, "type", alpha=0.2)  # 7 calibration rows: alpha 0.1 would need k = 8 > 7
     assert {p["fold"] for p in preds} == {"type=recursive", "type=synthetic"}
     assert len(preds) == 40 and "synthetic_r0_s0" not in {p["cell"] for p in preds}
+    assert {p["n_cal"] for p in preds} == {7}  # a third of the 21 training-side rows
+    assert evaluate(preds)["conformal"]["mean_set_size"] < 1.5  # a good model gives mostly single labels
     assert evaluate(preds)["auroc"]["value"] > 0.95
+
+
+def test_the_model_is_never_fitted_on_its_calibration_rows(monkeypatch):
+    sizes = []
+    fit = LogReg.fit
+    monkeypatch.setattr(LogReg, "fit", lambda self, rows, y, cols: sizes.append(len(rows)) or fit(self, rows, y, cols))
+    preds = leave_one_out(_rows(), "type")  # each fold: 20 rows on the other side, 7 calibrate
+    assert sizes == [13, 13] and {p["n_cal"] for p in preds} == {7}
 
 
 def test_cli_writes_risk_1_rows_and_an_evaluation(tmp_path):
@@ -84,7 +94,12 @@ def test_cli_writes_risk_1_rows_and_an_evaluation(tmp_path):
         os.chdir(cwd)
     rows = [json.loads(line) for line in (tmp_path / "out/predictions.jsonl").read_text().splitlines()]
     assert len(rows) == 18  # 3 types x 3 seeds x 2 contaminated ratios
-    assert all(r["schema"] == "risk/1" and r["split"] == "test" and r["conformal_set"] == [0, 1] for r in rows)
+    assert all(r["schema"] == "risk/1" and r["split"] == "test" and r["alpha"] == 0.1 for r in rows)
+    assert all(r["conformal_set"] in ([], [0], [1], [0, 1]) for r in rows)
     report = json.loads((tmp_path / "out/evaluation.json").read_text())
     assert report["leave_one_type_out"]["n"] == 18
     assert report["leave_one_type_out"]["auroc"]["value"] == pytest.approx(1.0)
+    conf = report["leave_one_type_out"]["conformal"]
+    # 6 calibration rows can't support alpha 0.1 (k = ceil(7 * 0.9) = 7 > 6): every set is {0, 1}
+    assert all(r["conformal_set"] == [0, 1] for r in rows) and conf["coverage"]["value"] == 1.0
+    assert conf["target"] == 0.9 and 0 <= conf["coverage"]["value"] <= 1 and conf["n_cal_per_fold"] == [6]
