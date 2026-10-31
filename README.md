@@ -105,6 +105,17 @@ pip install -r requirements.txt
 pytest -q                                            # smoke test should pass
 ```
 
+To reproduce results on another machine (pools, grids, X1/X2 runs), install the exact
+versions that produced them instead:
+
+```bash
+pip install -r requirements.lock.txt   # Python 3.13, CUDA 12.4 torch wheel
+```
+
+The lock pins `torch==2.6.0+cu124` from the PyTorch index. On a machine without CUDA 12.4,
+install a matching `torch==2.6.0` build first, then the lock file. Regenerate the lock when
+a dependency is added.
+
 Experiments are config-driven and logged to a local MLflow database
 (`mlruns/`, git-ignored; view with `mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db`):
 
