@@ -129,7 +129,7 @@ python -m src.evaluation.whitebox --config configs/whitebox.yaml [--summarize-on
 python -m src.evaluation.earlywarning --config configs/earlywarning.yaml
 python -m src.features.run_table [--grid ...] [--whitebox ...] [--out reports/grid/run_table.csv]
 python -m pytest -q
-ruff check --isolated --select F src tests
+ruff check --isolated --select F src tests dashboard
 ```
 
 ---
@@ -153,7 +153,7 @@ ruff check --isolated --select F src tests
 5. **Heavy imports stay lazy** (torch, transformers, peft, datasets, sentence-transformers,
    mlflow, matplotlib): import inside functions. Tests use stubs and must pass with only
    `ruff pytest pyyaml` installed. That's exactly what CI installs.
-6. **Every PR:** `python -m pytest -q` and `ruff check --isolated --select F src tests`
+6. **Every PR:** `python -m pytest -q` and `ruff check --isolated --select F src tests dashboard`
    pass. New logic gets a test that **fails without the fix**: show it in the PR.
 7. **Results are committed, data and models are not.** Commit `reports/**` JSON/JSONL/PNG.
    Never commit `data/`, checkpoints, `mlruns/`, `*.bak*`, or anything with secrets.
@@ -344,8 +344,24 @@ FastAPI, read-only over `reports/**` plus job endpoints. The **OpenAPI spec is t
 `GET /v1/features/{dataset}`, `GET /v1/risk`, `GET /v1/repair/{dataset}`,
 `GET /v1/runs/{run_id}/trainlog` and `GET /v1/runs/{run_id}/stream` (SSE),
 `POST /v1/audits` (upload a JSONL dataset → job id) and `GET /v1/audits/{id}`,
-`GET /v1/bench/samples?dataset&type&ratio&limit`. Errors use RFC 7807 problem+json. The UI
+`GET /v1/bench/samples?dataset&type&ratio&limit`, plus `GET /v1/grids/{dataset}/whitebox`
+(per-checkpoint signals, for the cell-detail view). Errors use RFC 7807 problem+json. The UI
 generates its TypeScript client from the spec and never hand-writes request types.
+
+v1 read routes are live (#30): `python -m dashboard.api` (http://127.0.0.1:8000, docs at
+`/docs`). The stream (#36) and audit routes (#34) are added later; adding routes or optional
+fields stays v1, renaming or removing is `/v2`. What the UI can rely on:
+- **404 problem = "not produced yet"** (e.g. no TinyStories grid yet): show an empty state, not
+  an error. 422 = a bad parameter.
+- Wide rows are reshaped for TypeScript: §7.2's `f_<family>_<name>` columns arrive as
+  `features: {"<family>_<name>": value}`, and §7.6's `sig_*` columns as `signals: {...}` (with
+  `alarm_signal` naming a `signals` key). Everything else is as in §7.
+- Every response has a weak `ETag`; send it back as `If-None-Match` and get `304` while the
+  report is unchanged (TanStack Query can poll cheaply).
+- `GET /v1/gates` returns one entry per gate and dataset (GATE 2/3 per grid, the rest once), with
+  `status` `passed | failed | not_evaluable | pending`, the rule in words and `exploratory`.
+- `dashboard/api/openapi.json` is checked against the code by `tests/test_api.py`; regenerate it
+  with `python -m dashboard.api --openapi`.
 
 ---
 
@@ -551,11 +567,11 @@ alarm and the canary.
       at CP2.
 
 ### 10.3 API (`dashboard/api/`), v1 frozen by CP0+5 days
-- [ ] FastAPI + Pydantic v2 + uvicorn. Read-only routes over `reports/**` (§7.7), with an ETag
-      from file mtimes. Job routes for audits run in a background worker. Plain
+- [x] FastAPI + Pydantic v2 + uvicorn. Read-only routes over `reports/**` (§7.7), with an ETag
+      from file mtimes (#30). Job routes for audits run in a background worker. Plain
       `concurrent.futures` is enough; no Celery or Redis unless proven necessary.
-- [ ] `python -m dashboard.api` serves on `:8000`. CORS for `localhost:5173`. Commit
-      `openapi.json`. Contract test: every route in the spec returns schema-valid fixtures.
+- [x] `python -m dashboard.api` serves on `:8000`. CORS for `localhost:5173`. Commit
+      `openapi.json`. Contract test: every route in the spec returns schema-valid fixtures (#30).
 - [ ] `POST /v1/audits`: validates the upload against `Sample`, runs Track A's feature suite +
       risk model + per-sample scores, and returns the §7.4/§7.3 shapes. Size limit and a clear
       problem+json error on bad input.

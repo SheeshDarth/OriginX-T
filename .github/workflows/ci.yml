@@ -19,8 +19,9 @@ jobs:
           python -m pip install --upgrade pip
           # Tests import torch/transformers/datasets lazily, so CI skips the
           # heavy requirements.txt and fails loudly if a test does need them.
-          pip install ruff pytest pyyaml
+          # fastapi + httpx (TestClient) for the API contract tests, at the lock's versions.
+          pip install ruff pytest pyyaml fastapi==0.115.5 httpx==0.28.1
       - name: Lint
-        run: ruff check --isolated --select F src tests  # real bugs only; style rules would flag existing code
+        run: ruff check --isolated --select F src tests dashboard  # real bugs only; style rules would flag existing code
       - name: Test
         run: pytest -q
