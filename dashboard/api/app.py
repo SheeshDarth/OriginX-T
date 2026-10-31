@@ -270,12 +270,15 @@ def _with_prefix(row: dict[str, Any], prefix: str) -> dict[str, Any]:
 
 def create_app(root: Path = REPO) -> FastAPI:
     reports = Reports(root)
+    # Descriptions are explicit: the default is Python's status phrase, which 3.13 changed for
+    # 422, and the committed spec must not depend on the Python version.
     problem = {"model": Problem, "content": {"application/problem+json": {}}}
     app = FastAPI(
         title="ORIGIN-T API", version=API_VERSION,
         description="Read-only access to ORIGIN-T's reports (HANDBOOK §7.7). Errors are RFC 7807 "
                     "problem+json. Responses carry a weak ETag; send it as If-None-Match for a 304.",
-        responses={404: problem, 422: problem},
+        responses={404: {**problem, "description": "Not found, or not produced yet"},
+                   422: {**problem, "description": "Invalid request parameters"}},
     )
     app.add_middleware(
         CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
