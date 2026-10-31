@@ -745,7 +745,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -756,7 +756,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Bench Samples",
@@ -807,7 +807,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -818,7 +818,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Features",
@@ -854,7 +854,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -865,7 +865,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Gates",
@@ -916,7 +916,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -927,7 +927,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Grid Curves",
@@ -978,7 +978,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -989,7 +989,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Grid Results",
@@ -1040,7 +1040,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -1051,7 +1051,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Grid Whitebox",
@@ -1102,7 +1102,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -1113,7 +1113,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Repair",
@@ -1149,7 +1149,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -1160,7 +1160,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Risk",
@@ -1208,7 +1208,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Not Found"
+            "description": "Not found, or not produced yet"
           },
           "422": {
             "content": {
@@ -1219,7 +1219,7 @@
               },
               "application/problem+json": {}
             },
-            "description": "Unprocessable Content"
+            "description": "Invalid request parameters"
           }
         },
         "summary": "Trainlog",
