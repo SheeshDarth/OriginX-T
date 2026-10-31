@@ -1,0 +1,10 @@
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "synthetic_r0_s0", "p_degrade": 0.05, "label": 0, "conformal_set": [0], "alpha": 0.1, "model": "logreg@1", "split": "train"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "p_degrade": 0.5, "label": 1, "conformal_set": [0, 1], "alpha": 0.1, "model": "logreg@1", "split": "train"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "synthetic_r1_s0", "p_degrade": 0.95, "label": 1, "conformal_set": [1], "alpha": 0.1, "model": "logreg@1", "split": "train"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "recursive_r0.25_s1", "p_degrade": 0.28, "label": 1, "conformal_set": [0, 1], "alpha": 0.1, "model": "logreg@1", "split": "train"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "recursive_r1_s1", "p_degrade": 0.95, "label": 1, "conformal_set": [1], "alpha": 0.1, "model": "logreg@1", "split": "cal"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "paraphrased_r0.5_s2", "p_degrade": 0.5, "label": 1, "conformal_set": [0, 1], "alpha": 0.1, "model": "logreg@1", "split": "cal"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "benchmark_near_r0.5_s0", "p_degrade": 0.5, "label": 1, "conformal_set": [0, 1], "alpha": 0.1, "model": "logreg@1", "split": "cal"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "benchmark_near_r1_s1", "p_degrade": 0.95, "label": 1, "conformal_set": [1], "alpha": 0.1, "model": "logreg@1", "split": "test"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "human_control_r0.5_s0", "p_degrade": 0.05, "label": 0, "conformal_set": [0], "alpha": 0.1, "model": "logreg@1", "split": "test"}
+{"schema": "risk/1", "dataset": "wikitext2", "cell": "human_control_r1_s2", "p_degrade": 0.05, "label": 0, "conformal_set": [0], "alpha": 0.1, "model": "logreg@1", "split": "test"}
