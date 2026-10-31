@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Gate } from "../api/client";
+import { QueryView } from "../components/QueryView";
 import { StatusBadge } from "../components/StatusBadge";
 
 const REPO = "https://github.com/SheeshDarth/OriginX-T/blob/main/";
@@ -45,63 +46,55 @@ export function Overview() {
       <p className="mb-4 text-sm text-muted">
         Each gate is a go/no-go rule fixed before its results existed.
       </p>
-      {gates.isPending && (
-        <div
-          aria-label="Loading gates"
-          className="h-40 animate-pulse rounded bg-border/50"
-        />
-      )}
-      {gates.isError && (
-        <p role="alert" className="text-sm text-bad">
-          Could not load gates ({gates.error.message}). Is the API running?{" "}
-          <code className="font-mono">python -m dashboard.api</code>
-        </p>
-      )}
-      {gates.data && (
-        <table className="w-full border-collapse text-sm">
-          <thead className="text-left text-xs uppercase tracking-wide text-muted">
-            <tr className="border-b border-border">
-              <th className="py-2 pr-4 font-medium">Gate</th>
-              <th className="py-2 pr-4 font-medium">Dataset</th>
-              <th className="py-2 pr-4 font-medium">Status</th>
-              <th className="py-2 pr-4 font-medium">Rule</th>
-              <th className="py-2 pr-4 font-medium">Evidence</th>
-            </tr>
-          </thead>
-          <tbody>
-            {gates.data.map((g) => (
-              <tr
-                key={`${g.id}-${g.dataset ?? ""}`}
-                id={g.id}
-                className="border-b border-border align-top"
-              >
-                <td className="py-2 pr-4 font-medium">{g.name}</td>
-                <td className="py-2 pr-4 font-mono text-xs">
-                  {g.dataset ?? "—"}
-                </td>
-                <td className="whitespace-nowrap py-2 pr-4">
-                  <StatusBadge status={g.status} />
-                  {g.exploratory && (
-                    <span className="ml-2 text-xs text-muted">exploratory</span>
-                  )}
-                </td>
-                <td className="py-2 pr-4 text-muted">{g.rule}</td>
-                <td className="py-2 pr-4">
-                  {evidence(g)}
-                  {g.source && (
-                    <a
-                      href={REPO + g.source}
-                      className="ml-2 font-mono text-xs text-accent underline"
-                    >
-                      source
-                    </a>
-                  )}
-                </td>
+      <QueryView query={gates} label="gates" empty="No gates reported yet.">
+        {(data) => (
+          <table className="w-full border-collapse text-sm">
+            <thead className="text-left text-xs uppercase tracking-wide text-muted">
+              <tr className="border-b border-border">
+                <th className="py-2 pr-4 font-medium">Gate</th>
+                <th className="py-2 pr-4 font-medium">Dataset</th>
+                <th className="py-2 pr-4 font-medium">Status</th>
+                <th className="py-2 pr-4 font-medium">Rule</th>
+                <th className="py-2 pr-4 font-medium">Evidence</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {data.map((g) => (
+                <tr
+                  key={`${g.id}-${g.dataset ?? ""}`}
+                  id={g.id}
+                  className="border-b border-border align-top"
+                >
+                  <td className="py-2 pr-4 font-medium">{g.name}</td>
+                  <td className="py-2 pr-4 font-mono text-xs">
+                    {g.dataset ?? "—"}
+                  </td>
+                  <td className="whitespace-nowrap py-2 pr-4">
+                    <StatusBadge status={g.status} />
+                    {g.exploratory && (
+                      <span className="ml-2 text-xs text-muted">
+                        exploratory
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-4 text-muted">{g.rule}</td>
+                  <td className="py-2 pr-4">
+                    {evidence(g)}
+                    {g.source && (
+                      <a
+                        href={REPO + g.source}
+                        className="ml-2 font-mono text-xs text-accent underline"
+                      >
+                        source
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </QueryView>
     </section>
   );
 }
