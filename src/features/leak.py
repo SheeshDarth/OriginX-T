@@ -21,12 +21,17 @@ VERSION = 1
 THRESHOLD = 0.9
 
 
+def best_matches(texts: list[str], bench: list[str]) -> list[float]:
+    """Each text's highest similarity to any benchmark item."""
+    # ponytail: all pairs, ~0.13 s per text for 200 items (~2 min a cell); shard over processes if that hurts
+    return [max(similarity(t, b) for b in bench) for t in texts]
+
+
 def leak(texts: list[str], ctx: Mapping[str, Any] | None = None) -> dict[str, Optional[float]]:
     bench = list((ctx or {}).get("benchmark") or [])
     if not texts or not bench:
         return {"max_sim": None, "mean_sim": None, "frac_above_0_9": None}
-    # ponytail: all pairs, ~0.13 s per text for 200 items (~2 min a cell); shard cells over processes if that hurts
-    best = [max(similarity(t, b) for b in bench) for t in texts]
+    best = best_matches(texts, bench)
     return {
         "max_sim": max(best),
         "mean_sim": sum(best) / len(best),
