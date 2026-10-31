@@ -16,7 +16,8 @@
       "synthetic",
       "recursive",
       "paraphrased",
-      "benchmark_near"
+      "benchmark_near",
+      "human_control"
     ],
     "share_baseline": true,
     "device": "cuda",
@@ -123,6 +124,61 @@
       "benchmark_ppl_mean": 59.239293701777484,
       "benchmark_ppl_min": 59.09327979205981,
       "benchmark_ppl_max": 59.37415947921778
+    },
+    {
+      "type": "human_control",
+      "ratio": 0.0,
+      "n_seeds": 3,
+      "holdout_ppl_mean": 56.596409715662695,
+      "holdout_ppl_min": 56.39321996278509,
+      "holdout_ppl_max": 56.87423799855892,
+      "benchmark_ppl_mean": 61.31468653915468,
+      "benchmark_ppl_min": 61.0961934735121,
+      "benchmark_ppl_max": 61.6096386433463
+    },
+    {
+      "type": "human_control",
+      "ratio": 0.25,
+      "n_seeds": 3,
+      "holdout_ppl_mean": 56.54795732062174,
+      "holdout_ppl_min": 56.22686483422072,
+      "holdout_ppl_max": 56.7930511794746,
+      "benchmark_ppl_mean": 61.26928915868772,
+      "benchmark_ppl_min": 60.93904095492477,
+      "benchmark_ppl_max": 61.47701264168309
+    },
+    {
+      "type": "human_control",
+      "ratio": 0.5,
+      "n_seeds": 3,
+      "holdout_ppl_mean": 56.41580126665602,
+      "holdout_ppl_min": 56.01206709163712,
+      "holdout_ppl_max": 56.70685404897755,
+      "benchmark_ppl_mean": 61.23390457315193,
+      "benchmark_ppl_min": 60.82921194716938,
+      "benchmark_ppl_max": 61.51759012188948
+    },
+    {
+      "type": "human_control",
+      "ratio": 0.75,
+      "n_seeds": 3,
+      "holdout_ppl_mean": 56.47364221554144,
+      "holdout_ppl_min": 56.10992406201051,
+      "holdout_ppl_max": 56.665208565847465,
+      "benchmark_ppl_mean": 61.212608264629374,
+      "benchmark_ppl_min": 60.874493922193224,
+      "benchmark_ppl_max": 61.424103619337465
+    },
+    {
+      "type": "human_control",
+      "ratio": 1.0,
+      "n_seeds": 3,
+      "holdout_ppl_mean": 56.38727782838723,
+      "holdout_ppl_min": 55.95957449041629,
+      "holdout_ppl_max": 56.71592065733519,
+      "benchmark_ppl_mean": 61.09223083834477,
+      "benchmark_ppl_min": 60.604791594337335,
+      "benchmark_ppl_max": 61.37698222127941
     },
     {
       "type": "paraphrased",

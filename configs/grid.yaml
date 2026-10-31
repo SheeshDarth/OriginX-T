@@ -4,11 +4,16 @@
 #   python -m src.finetune.grid --config configs/grid.yaml
 #   python -m src.finetune.grid --config configs/grid.yaml --report-only
 #
-# 4 types x 5 ratios x 3 seeds = 60 cells. At ratio 0 the data is all human for
-# every type, so with share_baseline one model per seed covers all four: 51
+# 5 types x 5 ratios x 3 seeds = 75 cells. At ratio 0 the data is all human for
+# every type, so with share_baseline one model per seed covers all five: 63
 # fine-tunes. Building the recursive contamination fine-tunes recursive_depth - 1
-# more models per seed (3 at depth 2). About 54 fine-tunes at ~9 min each on a
-# 6GB GPU, roughly 8 hours.
+# more models per seed (3 at depth 2). About 66 fine-tunes at ~75 s each on an
+# RTX 2050 (4GB), under 1.5 hours.
+#
+# human_control (the healthy arm, GATE 3's negatives) was added after the first 60
+# cells. `types` is not part of the fingerprint, so the grid resumed and trained only
+# its 12 contaminated-ratio cells, reusing the ratio-0 baselines. It is reported, never
+# gated (gate.collapse_types can not include it).
 #
 # A killed run resumes where it stopped: finished cells are read back from
 # {output_dir}/results.jsonl. Changing a setting that affects results (model,
@@ -27,7 +32,7 @@
 
 seeds: [0, 1, 2]
 ratios: [0.0, 0.25, 0.5, 0.75, 1.0]
-types: [synthetic, recursive, paraphrased, benchmark_near]
+types: [synthetic, recursive, paraphrased, benchmark_near, human_control]
 share_baseline: true
 
 device: cuda            # "cpu" works for the smoke config only

@@ -1,62 +1,156 @@
 {
   "alpha_adjusted": 0.008333333333333333,
-  "never_collapse": 0,
+  "never_collapse": 3,
   "signals": {
     "anisotropy_last": {
+      "auroc": 0.2222222222222222,
+      "auroc_ci": [
+        0.0,
+        0.6153846153846154
+      ],
+      "early_warning": {
+        "detected": 0,
+        "detection_rate": 0.0,
+        "false_alarm_rate": 0.0,
+        "leads": [],
+        "mean_lead": null,
+        "median_lead": null,
+        "n_collapsing": 12,
+        "threshold": 0.004561992791237035
+      },
       "n_collapsing": 12,
-      "n_never": 0,
-      "n_trajectories": 12,
-      "reason": "no trajectory that never collapses",
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9681031896810319,
       "skipped": [],
-      "status": "not_evaluable",
+      "status": "ok",
       "warns": false
     },
     "dead_fraction_mean": {
+      "auroc": 0.027777777777777776,
+      "auroc_ci": [
+        0.0,
+        0.12
+      ],
+      "early_warning": {
+        "detected": 0,
+        "detection_rate": 0.0,
+        "false_alarm_rate": 0.0,
+        "leads": [],
+        "mean_lead": null,
+        "median_lead": null,
+        "n_collapsing": 12,
+        "threshold": 0.00010850694444444406
+      },
       "n_collapsing": 12,
-      "n_never": 0,
-      "n_trajectories": 12,
-      "reason": "no trajectory that never collapses",
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 1.0,
       "skipped": [],
-      "status": "not_evaluable",
+      "status": "ok",
       "warns": false
     },
     "delta_rel_norm": {
+      "auroc": 0.1111111111111111,
+      "auroc_ci": [
+        0.0,
+        0.3333333333333333
+      ],
+      "early_warning": {
+        "detected": 0,
+        "detection_rate": 0.0,
+        "false_alarm_rate": 0.0,
+        "leads": [],
+        "mean_lead": null,
+        "median_lead": null,
+        "n_collapsing": 12,
+        "threshold": 0.0002520665572682554
+      },
       "n_collapsing": 12,
-      "n_never": 0,
-      "n_trajectories": 12,
-      "reason": "no trajectory that never collapses",
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9882011798820118,
       "skipped": [],
-      "status": "not_evaluable",
+      "status": "ok",
       "warns": false
     },
     "eff_rank_last": {
+      "auroc": 0.2222222222222222,
+      "auroc_ci": [
+        0.0,
+        0.6071428571428571
+      ],
+      "early_warning": {
+        "detected": 0,
+        "detection_rate": 0.0,
+        "false_alarm_rate": 0.0,
+        "leads": [],
+        "mean_lead": null,
+        "median_lead": null,
+        "n_collapsing": 12,
+        "threshold": 4.694493044564297
+      },
       "n_collapsing": 12,
-      "n_never": 0,
-      "n_trajectories": 12,
-      "reason": "no trajectory that never collapses",
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9685031496850315,
       "skipped": [],
-      "status": "not_evaluable",
+      "status": "ok",
       "warns": false
     },
     "part_ratio_last": {
+      "auroc": 0.25,
+      "auroc_ci": [
+        0.0,
+        0.6071428571428571
+      ],
+      "early_warning": {
+        "detected": 1,
+        "detection_rate": 0.08333333333333333,
+        "false_alarm_rate": 0.0,
+        "leads": [
+          2
+        ],
+        "mean_lead": 2.0,
+        "median_lead": 2,
+        "n_collapsing": 12,
+        "threshold": 0.043343467621370646
+      },
       "n_collapsing": 12,
-      "n_never": 0,
-      "n_trajectories": 12,
-      "reason": "no trajectory that never collapses",
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.945005499450055,
       "skipped": [],
-      "status": "not_evaluable",
+      "status": "ok",
       "warns": false
     },
     "stable_rank_attn": {
+      "auroc": 0.2361111111111111,
+      "auroc_ci": [
+        0.0,
+        0.5714285714285714
+      ],
+      "early_warning": {
+        "detected": 1,
+        "detection_rate": 0.08333333333333333,
+        "false_alarm_rate": 0.0,
+        "leads": [
+          1
+        ],
+        "mean_lead": 1.0,
+        "median_lead": 1,
+        "n_collapsing": 12,
+        "threshold": 0.03587057403993299
+      },
       "n_collapsing": 12,
-      "n_never": 0,
-      "n_trajectories": 12,
-      "reason": "no trajectory that never collapses",
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9465053494650535,
       "skipped": [],
-      "status": "not_evaluable",
+      "status": "ok",
       "warns": false
     }
   },
-  "status": "not_evaluable",
-  "trajectories": 12
+  "status": "failed",
+  "trajectories": 15
 }
