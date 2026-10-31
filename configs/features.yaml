@@ -1,0 +1,15 @@
+# Dataset features per grid cell (HANDBOOK §8.1, §7.2).
+#
+#   python -m src.features.suite --config configs/features.yaml --dataset wikitext2
+#
+# Needs the grid's data files and cached pools (data/processed/..., HANDBOOK §12.3):
+# run it on the machine that ran the grid, or copy them over. Resumable.
+
+families: [lex, leak]        # model, sem: Track C (§10.7), added here when they land
+output_dir: reports/features # <dataset>.jsonl, committed
+
+datasets:
+  wikitext2:
+    grid: configs/grid.yaml
+  tinystories:
+    grid: configs/grid_tinystories.yaml   # arrives with Track C's TinyStories grid
