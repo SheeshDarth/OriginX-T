@@ -615,8 +615,6 @@ def format_table(summary: Mapping[str, Any], key: str) -> str:
     return "\n".join(lines)
 
 
-_COLORS = {"synthetic": "#2a78d6", "recursive": "#eb6834", "paraphrased": "#1baf7a", "benchmark_near": "#eda100"}
-_MARKERS = {"synthetic": "o", "recursive": "s", "paraphrased": "^", "benchmark_near": "D"}
 _PANELS = (
     ("eff_rank_last", "Effective rank, last layer", "lower = fewer directions in use"),
     ("anisotropy_last", "Anisotropy, last layer", "higher = representations point one way"),
@@ -631,6 +629,8 @@ def _plot(summary: Mapping[str, Any], path: Path) -> None:
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    from ..finetune.grid import _COLORS, _MARKERS  # one palette for every grid figure
 
     curves = summary["curves"]
     panels = [p for p in _PANELS if any(p[0] in c for c in curves)]

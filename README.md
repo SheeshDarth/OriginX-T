@@ -168,12 +168,18 @@ lowers benchmark-item perplexity steadily with dose, 61.3 → 59.2 (−3.4%) at 
 memorisation is visible. Its hidden-holdout damage dropped from +8% to +2.4%. GATE 2 is
 unchanged.
 
-**GATE 3 not evaluable** (2026-10-31): all 12 trajectories collapse, so there are no
-healthy runs to measure false alarms against. White-box signals were measured on all 57
-checkpoints: anisotropy falls steadily with contamination (0.935 → ~0.90), against the
-pre-registered direction, while effective rank and dead neurons stay flat. Next: a healthy
-`human_control` arm and a confirmatory GATE 3 on TinyStories, with a rule fixed beforehand
-([HANDBOOK §13](docs/HANDBOOK.md)).
+**GATE 3 failed (exploratory)** (2026-10-31). The healthy `human_control` arm
+([#72](https://github.com/SheeshDarth/OriginX-T/pull/72)) now gives GATE 3 three
+never-collapsing trajectories: hidden-holdout perplexity stays flat (56.6 → 56.4) while the
+contaminated types rise. White-box signals were measured on all 66 checkpoints.
+
+No signal passes, and that is structural, not noise. 9 of the 12 contaminated trajectories
+already collapse at the first contaminated ratio (0.25), so on this ratio axis there is no
+stage before onset to warn from. Anisotropy still separates the arms *at* onset: it is flat
+for the control and falls for the contaminated types, the opposite of the pre-registered
+direction. It is reported as exploratory (D7). The confirmatory GATE 3 on TinyStories
+needs stages before onset (finer low ratios, or training steps as in X3), fixed in its rule
+beforehand ([HANDBOOK §13](docs/HANDBOOK.md)).
 
 **Working on this repo? Read [docs/HANDBOOK.md](docs/HANDBOOK.md) first.** It is the
 operating manual: tracks, owners, interfaces, checkpoints and rules.
@@ -181,7 +187,7 @@ operating manual: tracks, owners, interfaces, checkpoints and rules.
 Done so far: the contamination generators, the hidden-holdout safeguards, run logging
 (MLflow), the fine-tuning grid with its results, the white-box signals
 (`src/evaluation/whitebox.py`, [#15](https://github.com/SheeshDarth/OriginX-T/pull/15);
-measured on all 57 checkpoints), the scoring metrics
+measured on all 66 checkpoints), the scoring metrics
 (`src/evaluation/scoring.py`, [#16](https://github.com/SheeshDarth/OriginX-T/pull/16):
 AUROC/AUPRC/F1, bootstrap CIs, ECE, conformal coverage, lead stage) and a per-run table
 joining the two ([#17](https://github.com/SheeshDarth/OriginX-T/pull/17)). Not in the repo

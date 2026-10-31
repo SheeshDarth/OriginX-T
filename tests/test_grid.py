@@ -580,7 +580,7 @@ def test_plot_writes_a_figure(tmp_path):
     assert path.stat().st_size > 1000
 
 
-@pytest.mark.parametrize("name, cells", [("grid", 60), ("grid_smoke", 12)])
+@pytest.mark.parametrize("name, cells", [("grid", 75), ("grid_smoke", 12)])
 def test_shipped_configs_describe_the_expected_grid(name, cells):
     cfg = yaml.safe_load((REPO / f"configs/{name}.yaml").read_text())
     assert len(make_cells(cfg["types"], cfg["ratios"], cfg["seeds"])) == cells
