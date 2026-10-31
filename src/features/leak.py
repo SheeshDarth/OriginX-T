@@ -21,10 +21,33 @@ VERSION = 1
 THRESHOLD = 0.9
 
 
+_CACHE: dict[tuple[int, str], float] = {}  # (benchmark set, text) -> best similarity, for this process
+
+
+def _best(text: str, bench: tuple[str, ...]) -> float:
+    return max(similarity(text, b) for b in bench)
+
+
 def best_matches(texts: list[str], bench: list[str]) -> list[float]:
-    """Each text's highest similarity to any benchmark item."""
-    # ponytail: all pairs, ~0.13 s per text for 200 items (~2 min a cell); shard over processes if that hurts
-    return [max(similarity(t, b) for b in bench) for t in texts]
+    """Each text's highest similarity to any benchmark item.
+
+    All pairs, about 0.35 s per real WikiText text against 200 items. Two things keep the
+    grid affordable: every cell of a seed shares its 1000 human texts, so each distinct
+    text is scored once (cached), and new texts are spread over CPU cores.
+    """
+    items = tuple(bench)
+    key = hash(items)
+    todo = sorted({t for t in texts if (key, t) not in _CACHE})
+    if len(todo) > 100:  # a pool costs ~1 s to start; small calls (tests, one audit row) stay in-process
+        from concurrent.futures import ProcessPoolExecutor
+        from functools import partial
+
+        with ProcessPoolExecutor() as pool:
+            scores = list(pool.map(partial(_best, bench=items), todo, chunksize=16))
+    else:
+        scores = [_best(t, items) for t in todo]
+    _CACHE.update(((key, t), s) for t, s in zip(todo, scores))
+    return [_CACHE[(key, t)] for t in texts]
 
 
 def leak(texts: list[str], ctx: Mapping[str, Any] | None = None) -> dict[str, Optional[float]]:
