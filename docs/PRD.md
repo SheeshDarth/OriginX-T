@@ -57,7 +57,13 @@ suggests mitigation.
 10. Competing-risks survival (per failure-mode hazard).
 11. Causal/Shapley attribution + a fitted collapse scaling law.
 12. Safe-mix optimizer (utility-vs-risk Pareto front).
-13. Evidence dashboard (Streamlit).
+13. ORIGIN-T Console: product web UI (React + TypeScript, FastAPI backend; no Streamlit).
+    Owners and spec: [HANDBOOK §8.6](HANDBOOK.md).
+14. **X1** Harm-based data repair: clean by measured harm, not by "looks AI-written".
+15. **X2** Canary run: a small cheap fine-tune that predicts a larger model's damage.
+16. **X3** Live collapse alarm during training, with a calibrated false-alarm rate.
+    X1–X3: gates, owners and cut-offs in [HANDBOOK §11](HANDBOOK.md); research in
+    [STRETCH_GOALS.md](STRETCH_GOALS.md).
 
 **Won't (this cycle)**
 - Training a foundation model from scratch.

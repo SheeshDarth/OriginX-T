@@ -40,7 +40,7 @@ recursive generation), each stage has:
 | Attribution (gated) | `shap` |
 | Interpretability (gated) | `TransformerLens` or `nnsight` |
 | Experiment tracking | MLflow or W&B (offline mode) |
-| Backend / dashboard | FastAPI, Streamlit (Sprint 14 only) |
+| Backend / dashboard | FastAPI + Pydantic v2 (API); React + TypeScript + Vite, TanStack Router/Query/Table, Tailwind tokens, Radix UI, Observable Plot (web UI). No Streamlit. See [HANDBOOK §8.6](HANDBOOK.md#86-product-ui-dashboardweb-built-in-parallel-against-fixtures) |
 | Storage | SQLite (metadata), Parquet/JSONL (datasets) |
 
 ## 4. Model & dataset choices
@@ -92,6 +92,9 @@ P(recursive), P(benchmark-near).
 | Info-theoretic / behavioral-leakage signals | MAUVE, embedding-space Frechet distance, KL/JS human-vs-synthetic; ConStat-style performance-gap leakage detection |
 | Causal attribution | Ablate a contamination type -> reuse the matched fine-tune -> counterfactual degradation; Shapley attribution on the risk model |
 | Collapse scaling law | Fit degradation ~ f(synthetic ratio, recursion depth, size); report R-squared + held-out extrapolation error |
+| X1 Harm-based repair | Score each training sample by its effect on held-out loss (LoRA-gradient, representation-similarity baseline), replace the most harmful at equal size, retrain, report recovery. Gate and cut-off: [HANDBOOK §11](HANDBOOK.md#11-the-three-new-features-stretch-gated) |
+| X2 Canary run | Short small-model fine-tune whose signals predict a larger model's damage (Pythia-410M / Qwen2.5-0.5B target). Gate and cut-off: HANDBOOK §11 |
+| X3 Live collapse alarm | Training-time two-sided monitor on white-box signals with a conformally calibrated false-alarm rate. Gate and cut-off: HANDBOOK §11 |
 
 ## 7. Data schema
 

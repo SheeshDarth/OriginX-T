@@ -31,3 +31,10 @@ data/models/
 
 # Dry-run output of configs/grid_smoke.yaml (numbers are meaningless)
 reports/grid_smoke/
+
+# Backups written by grid --rerun-types
+reports/**/*.bak-*
+
+# Web UI build output
+dashboard/web/node_modules/
+dashboard/web/dist/
