@@ -537,10 +537,11 @@ alarm and the canary.
 ### 10.1 CP0 PR (§6.1). First thing.
 
 ### 10.2 Second dataset + GATE 3 fix, by CP1
-- [ ] **Healthy control arm:** a new contamination type `human_control` whose "pool" is
+- [x] **Healthy control arm:** a new contamination type `human_control` whose "pool" is
       *fresh human* samples (disjoint from the draw and the holdout). Its trajectories should
-      never collapse, which gives GATE 3 its negatives. Add to grid.py with tests. New type →
-      new config only, so existing fingerprints are unaffected.
+      never collapse, which gives GATE 3 its negatives. Done (#27): `grid.human_control_pool`.
+      Disjointness is by normalized text fingerprint, the pool's rows have `n_contaminated` 0,
+      and `validate_gate` refuses it as a GATE 2 collapse type. Fingerprints are unchanged.
 - [ ] `configs/grid_tinystories.yaml` → `reports/grid_tinystories/`: 5 types (4 + control) ×
       5 ratios × 3 seeds. Estimated ~1.5–2 h on the RTX 2050 (cells ~75 s each on WikiText;
       verify with the smoke config first). Keep checkpoints, then white-box on them.

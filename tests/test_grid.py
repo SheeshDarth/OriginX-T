@@ -39,7 +39,8 @@ def _human(seed):
 
 def _pool(kind, seed):
     return [
-        Sample(sample_id=f"{kind}-{seed}-{i}", response=f"{kind} {i} " * 5, source=kind, generation=1)
+        Sample(sample_id=f"{kind}-{seed}-{i}", response=f"{kind} {i} " * 5,
+               source="human" if kind in grid.CONTROL_TYPES else kind, generation=1)
         for i in range(N)
     ]
 
@@ -92,10 +93,10 @@ class Harness:
 
 
 def test_make_cells_is_the_full_grid_one_seed_at_a_time():
+    k = len(CONTAMINATION_TYPES)
     cells = make_cells(CONTAMINATION_TYPES, [0, 0.25, 0.5, 0.75, 1], [0, 1, 2])
-    assert len(cells) == 60
-    assert len(set(c.id for c in cells)) == 60
-    assert {c.seed for c in cells[:20]} == {0}  # seed 0 is finished before seed 1 starts
+    assert len(cells) == len(set(c.id for c in cells)) == k * 5 * 3
+    assert {c.seed for c in cells[:k * 5]} == {0}  # seed 0 is finished before seed 1 starts
     assert Cell("synthetic", 0.25, 1).id == "synthetic_r0.25_s1"
 
 
@@ -122,17 +123,18 @@ def test_ratio_zero_trains_once_per_seed_and_is_shared_across_types():
     h = Harness()
     rows = h.run(make_cells(CONTAMINATION_TYPES, [0.0, 0.5], [0, 1]))
 
-    assert len(rows) == 4 * 2 * 2
-    assert len(h.trained) == 2 * (1 + 4)  # per seed: one baseline + one cell per type at 0.5
+    k = len(CONTAMINATION_TYPES)
+    assert len(rows) == k * 2 * 2
+    assert len(h.trained) == 2 * (1 + k)  # per seed: one baseline + one cell per type at 0.5
     baselines = [r for r in rows if r["ratio"] == 0]
-    assert len(baselines) == 8
+    assert len(baselines) == 2 * k
     assert sum(not r["shared_baseline"] for r in baselines) == 2
     for seed in (0, 1):
         assert len({r["holdout_ppl"] for r in baselines if r["seed"] == seed}) == 1
     assert {r["type"] for r in baselines} == set(CONTAMINATION_TYPES)
     assert all(r["seconds"] == 0.0 for r in baselines if r["shared_baseline"])
     # nothing is generated for a ratio-0 cell: one pool per (type, seed) at ratio 0.5
-    assert len(h.pools) == 4 * 2
+    assert len(h.pools) == k * 2
 
 
 def test_the_mixture_depends_on_the_seed_but_not_on_the_contamination_type():
@@ -154,7 +156,7 @@ def test_the_mixture_depends_on_the_seed_but_not_on_the_contamination_type():
 def test_share_baseline_off_trains_every_cell():
     h = Harness()
     h.run(make_cells(CONTAMINATION_TYPES, [0.0, 1.0], [0]), share_baseline=False)
-    assert len(h.trained) == 8
+    assert len(h.trained) == 2 * len(CONTAMINATION_TYPES)
 
 
 def test_row_contents_and_logging():
@@ -494,7 +496,7 @@ def test_benchmark_near_is_reported_but_never_gated():
     assert "benchmark_near (reported, not gated)" in text and "-24.00" in text and "memorised" in text
 
     # a complete grid, with benchmark_near counted among the configured types, is evaluable
-    every = list(CONTAMINATION_TYPES)
+    every = [*GATE["collapse_types"], "benchmark_near"]
     assert grid.summarize(rows, seeds=SEEDS, ratios=RATIOS, gate=GATE, types=every)["gate_2_status"] == "passed"
     assert grid.summarize(_all_good(), seeds=SEEDS, ratios=RATIOS, gate=GATE)["benchmark_near"] == []
 
@@ -640,7 +642,8 @@ def _setup(tmp_path, monkeypatch, seeds=(0, 1), **overrides):
     )
     cfg.update(overrides)
     if "gate" not in overrides:  # the smoke gate is for the smoke grid; fit it to this one
-        gated = [t for t in cfg["types"] if t != "benchmark_near"] or list(cfg["types"])
+        gated = [t for t in cfg["types"] if t != "benchmark_near" and t not in grid.CONTROL_TYPES]
+        gated = gated or [t for t in cfg["types"] if t not in grid.CONTROL_TYPES]
         cfg["gate"] = {**cfg["gate"], "collapse_types": gated, "low_dose_ratio": max(cfg["ratios"])}
     cfg["data"].update(
         kept=str(data / "kept.jsonl"), holdout=str(data / "holdout.jsonl"),
@@ -820,6 +823,61 @@ def test_training_set_refuses_to_regenerate_a_missing_pool(tmp_path, monkeypatch
         grid.training_set(cfg, Cell("synthetic", 1.0, 0))
     assert grid.training_set(cfg, Cell("synthetic", 0.0, 0))  # ratio 0 needs no pool
     assert not spy.generators
+
+
+def test_human_control_pool_is_fresh_human_text_disjoint_from_the_draw_and_the_holdout():
+    data = {"n_train": 10, "min_words": 20, "max_words": 150}
+    kept = [Sample(sample_id=f"k{i}", response=_words("kept", i)) for i in range(60)]
+    # the holdout holds recased, re-punctuated copies of k40..k59: those must still be excluded
+    holdout = [Sample(sample_id=f"h{i}", response=kept[i].response.upper() + "!", split="hidden_holdout")
+               for i in range(40, 60)]
+    twins = {f"k{i}" for i in range(40, 60)}
+
+    for seed in (0, 1, 2):
+        pool = grid.human_control_pool(kept, holdout, data, seed)
+        human, source = grid.draw_human(kept, data, seed)
+        assert len(pool) == 10 and all(s.source == "human" and s.split == "train" for s in pool)
+        ids = {s.sample_id for s in pool}
+        assert not ids & {s.sample_id for s in (*human, *source)}
+        assert not ids & twins
+        assert grid.human_control_pool(kept, holdout, data, seed) == pool  # deterministic
+        # mix() takes it like any pool, and nothing in the result counts as contaminated
+        mixed = grid.mixture(human, pool, Cell("human_control", 0.5, seed))
+        assert len(mixed) == 10 and all(s.source == "human" for s in mixed)
+        assert sum(s.sample_id in ids for s in mixed) == 5
+    # its own RNG: adding the arm leaves every seed's draw exactly as before
+    assert grid.draw_human(kept, data, 0) == grid.draw_human(kept, data, 0)
+
+
+def test_human_control_can_never_be_a_gate_2_collapse_type():
+    types = [*CONTAMINATION_TYPES]
+    with pytest.raises(ValueError, match="healthy control"):
+        grid.validate_gate({**GATE, "collapse_types": ["synthetic", "human_control"]},
+                           types=types, ratios=RATIOS)
+    grid.validate_gate(GATE, types=types, ratios=RATIOS)  # configured but not gated: fine
+
+
+def test_main_trains_a_human_control_arm_that_is_reported_but_not_gated(tmp_path, monkeypatch):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, types=["synthetic", "human_control"],
+                              ratios=[0.0, 0.5, 1.0])
+    assert grid.main(["--config", str(config)]) == 0
+
+    trained = {name: ts for name, ts, _ in spy.trained if not name.startswith("pool_")}
+    holdout = {grid.training_text(s) for s in load_dataset(cfg["data"]["holdout"])}
+    for seed in (0, 1):
+        texts = trained[f"human_control_r1_s{seed}"]
+        assert len(texts) == 10 and not any("generated" in t for t in texts)
+        assert not set(texts) & set(trained[f"synthetic_r0_s{seed}"]) and not set(texts) & holdout
+        # the rebuild path finds the cached pool, like for any other type
+        cell = Cell("human_control", 0.5, seed)
+        assert [grid.training_text(s) for s in grid.training_set(cfg, cell)] == trained[cell.id]
+    assert len(spy.generated) == 2  # only the synthetic pools called a generator
+
+    rows = [json.loads(line) for line in (tmp_path / "out/results.jsonl").read_text().splitlines()]
+    assert all(r["n_contaminated"] == 0 for r in rows if r["type"] == "human_control")
+    summary = json.loads((tmp_path / "out/summary.json").read_text())
+    assert "human_control" not in summary["gate"]["types"]
+    assert any(c["type"] == "human_control" for c in summary["curves"])
 
 
 def test_main_requires_a_zero_ratio(tmp_path, monkeypatch):

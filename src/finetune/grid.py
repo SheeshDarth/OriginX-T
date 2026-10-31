@@ -62,6 +62,10 @@ How a cell is built, so the only difference between cells is the contamination:
   Only the last generation is the contamination; the intermediate checkpoints
   are deleted unless ``keep_models`` is set. This costs ``recursive_depth - 1``
   extra fine-tunes per seed on top of the cells.
+- ``human_control`` is the healthy arm: its pool is a third disjoint draw of human
+  text (also disjoint from the hidden holdout), so a cell's mix changes which human
+  texts it sees but adds no contamination (``n_contaminated`` is 0). It gives GATE 3
+  trajectories that should not collapse, and can never be a GATE 2 collapse type.
 - At ratio 0 the training set is all human whatever the type, so one model per
   seed serves every type (``share_baseline``). That is 12 of the 60 cells; set
   it to false to train them all separately.
@@ -92,12 +96,17 @@ from ..evaluation.tracking import Run, track_run
 from ..generation.benchmark_near import make_near_duplicates
 from ..generation.mixer import mix
 from ..generation.model_based import Generate, hf_generator, make_paraphrased, make_synthetic
+from ..ingestion.check_leakage import text_fingerprint
 from ..ingestion.loaders import load_dataset, write_jsonl
 from ..ingestion.schema import Sample
 from .collapse import _pick, load_holdout, training_text
 from .lora import train_lora
 
-CONTAMINATION_TYPES: tuple[str, ...] = ("synthetic", "recursive", "paraphrased", "benchmark_near")
+CONTAMINATION_TYPES: tuple[str, ...] = (
+    "synthetic", "recursive", "paraphrased", "benchmark_near", "human_control",
+)
+# Healthy arms: their pool is more human text, so they must never be gated as collapse types.
+CONTROL_TYPES: frozenset[str] = frozenset({"human_control"})
 
 # Settings that change what a cell's number means. A results file (and a cache of
 # generated contamination) is only reusable while these are unchanged; the axes
@@ -187,6 +196,22 @@ def draw_human(kept: Sequence[Sample], data: Mapping[str, Any], seed: int) -> tu
     used = {s.response for s in human}
     source = _pick([s for s in kept if s.response not in used], n, lo, hi, rng)
     return human, source
+
+
+def human_control_pool(
+    kept: Sequence[Sample], holdout: Sequence[Sample], data: Mapping[str, Any], seed: int
+) -> list[Sample]:
+    """The ``human_control`` pool: fresh human texts for a healthy arm that never collapses.
+
+    Disjoint (by normalized text fingerprint) from both halves of the seed's draw and from
+    the whole hidden ``holdout``, so mixing it in changes which human texts a cell sees but
+    adds no contamination. Its own RNG leaves every other draw unchanged.
+    """
+    human, source = draw_human(kept, data, seed)
+    used = {text_fingerprint(s) for s in (*human, *source, *holdout)}
+    fresh = [s for s in kept if text_fingerprint(s) not in used]
+    rng = random.Random(f"human_control-{seed}")
+    return _pick(fresh, data["n_train"], data["min_words"], data["max_words"], rng)
 
 
 def mixture(human: list[Sample], pool: list[Sample], cell: Cell) -> list[Sample]:
@@ -429,6 +454,11 @@ def validate_gate(gate: Any, *, types: Sequence[str], ratios: Sequence[float]) -
             f"gate.collapse_types must be a non-empty subset of the configured types {list(types)}, "
             f"got {collapse}"
         )
+    if CONTROL_TYPES & set(collapse):
+        raise ValueError(
+            f"gate.collapse_types can not include the healthy control arm(s) "
+            f"{sorted(CONTROL_TYPES & set(collapse))}: they are expected not to degrade"
+        )
     if not 0 <= gate["monotone_tolerance"] < 1:
         raise ValueError(f"gate.monotone_tolerance must be in [0, 1), got {gate['monotone_tolerance']}")
     if gate["low_dose_ratio"] not in ratios or gate["low_dose_ratio"] <= 0:
@@ -637,9 +667,11 @@ def format_table(curves: Sequence[Mapping[str, Any]], key: str = "holdout_ppl_me
 # Slots 1-4 of the validated categorical palette; adjacent pairs clear the CVD and
 # normal-vision floors. Aqua and yellow are under 3:1 on white, so every line also
 # gets its own marker and a direct label rather than relying on colour alone.
+# The healthy control is neutral grey (5.3:1 on white): a reference line, not a fifth category.
 _COLORS = {"synthetic": "#2a78d6", "recursive": "#eb6834",
-           "paraphrased": "#1baf7a", "benchmark_near": "#eda100"}
-_MARKERS = {"synthetic": "o", "recursive": "s", "paraphrased": "^", "benchmark_near": "D"}
+           "paraphrased": "#1baf7a", "benchmark_near": "#eda100", "human_control": "#6b6a66"}
+_MARKERS = {"synthetic": "o", "recursive": "s", "paraphrased": "^", "benchmark_near": "D",
+            "human_control": "v"}
 _INK, _INK_MUTED = "#0b0b0b", "#52514e"
 
 
@@ -832,7 +864,9 @@ def _train_all(
                 device=cfg["device"], **t,
             )
 
-        if kind == "benchmark_near":
+        if kind == "human_control":
+            pool = human_control_pool(kept, load_dataset(d["holdout"]), d, seed)
+        elif kind == "benchmark_near":
             pool = make_near_duplicates(
                 bench_items, count=d["n_train"],
                 exact_fraction=cfg["benchmark_near"]["exact_fraction"], seed=seed,
