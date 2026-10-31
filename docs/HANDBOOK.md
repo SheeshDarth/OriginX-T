@@ -32,10 +32,14 @@ no further prompting:
    - Vishnu's is already known: `vishnu-k-dev <190108551+vishnu-k-dev@users.noreply.github.com>`.
 4. **Check the environment** (§12.1): Python ≥ 3.11, `pip install -r requirements.txt`,
    `python -m pytest -q` passes. Record the GPU (`nvidia-smi`).
-5. **Find your next task:** the first unchecked item in your track's task list
-   for the current checkpoint (§6 tells you which checkpoint is current by date).
-   If a task depends on an interface from another track, build against the **stub fixtures**
-   described in §7. Never wait for another track.
+5. **Find your next task in GitHub Issues**, the tracker for this project:
+   `gh issue list --repo SheeshDarth/OriginX-T --assignee <their-username> --milestone "<current checkpoint>" --state open`.
+   Pick the lowest-numbered open issue whose "Depends on" issues are closed. §6 tells you
+   which checkpoint is current by date. Issue titles carry the handbook task id (`[C4]`,
+   `[A3]`, `[B7]`), and §17 maps ids to issue numbers. If a task depends on an interface
+   from another track that isn't merged yet, build against the **stub fixtures** described
+   in §7. Never wait for another track. Put `Closes #<n>` in the PR so the issue closes on
+   merge, and tick the issue's checklist as you go.
 6. **Tell your human in 5 lines or fewer:** the current checkpoint, your next task, what
    you'll produce, and roughly how long it takes. Then start. Don't ask permission for
    routine steps (§4).
@@ -720,3 +724,24 @@ standups.
   fingerprint are refused.
 - **Pre-registered:** a rule merged before the results it judges exist.
 - **Recovery:** share of the damage a repair undoes (§7.5).
+
+---
+
+## 17. Issue tracker (GitHub Issues)
+
+All work is tracked in [GitHub Issues](https://github.com/SheeshDarth/OriginX-T/issues),
+with one **milestone per checkpoint** (CP0 Kickoff, CP1, CP2, CP3 Integration, CP4 Paper)
+and labels `track:A|B|C`, `team`, `X1|X2|X3`, `stretch`, `feature`, `research`, `infra`,
+`ui`, `gate`, `docs`, `blocked`. Each issue has the task's acceptance criteria, its owner,
+its milestone and its dependencies. A new task gets an issue *before* work starts.
+
+| Track | Task id → issue |
+|---|---|
+| Team | T1 #21 · T2 #22 · T3 #23 |
+| C: Vishnu | C1 #24 · C2 #25 · C3 #26 · C4 #27 · C5 #28 · C6 #29 · C7 #30 · C8 #31 · C9 #32 · C10 #33 · C11 #34 · C12 #35 · C13 #36 · C14 #37 · C15 #38 · C16 #39 · C17 #40 · C18 #41 · C19 #42 |
+| A: Revanth | A1 #43 · A2 #44 · A3 #45 · A4 #46 · A5 #47 · A6 #48 · A7 #49 · A8 #50 · A9 #51 · A10 #52 · A11 #53 · A12 #54 · A13 #55 |
+| B: Siddharth | B1 #56 · B2 #57 · B3 #58 · B4 #59 · B5 #60 · B6 #61 · B7 #62 · B8 #63 · B9 #64 · B10 #65 · B11 #66 · B12 #67 |
+
+**First issues, in order:** CP0: #21 (all), #24, #25 (Vishnu), #43, #44 (Revanth), #56, #57
+(Siddharth). Then the CP1 unblockers: **#26** (C3, unblocks Revanth's suite), **#58** (B3,
+unblocks the TinyStories grid), **#27** (C4, healthy control arm).
