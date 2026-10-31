@@ -176,6 +176,49 @@ def make_cells(
     return [Cell(t, r, s) for s in seeds for r in ratios for t in types]
 
 
+def draw_human(kept: Sequence[Sample], data: Mapping[str, Any], seed: int) -> tuple[list[Sample], list[Sample]]:
+    """A seed's clean training texts and the disjoint source its contamination is made from.
+
+    The clean half is the spike's Gen-0 draw for this seed. ``data`` is the config's ``data:``.
+    """
+    lo, hi, n = data["min_words"], data["max_words"], data["n_train"]
+    rng = random.Random(seed)
+    human = _pick(list(kept), n, lo, hi, rng)
+    used = {s.response for s in human}
+    source = _pick([s for s in kept if s.response not in used], n, lo, hi, rng)
+    return human, source
+
+
+def mixture(human: list[Sample], pool: list[Sample], cell: Cell) -> list[Sample]:
+    """A cell's training samples: ``human`` with ``cell.ratio`` of it drawn from ``pool`` instead."""
+    return mix(human, pool, ratio=cell.ratio, seed=cell.seed, total=len(human))
+
+
+def training_set(
+    cfg: Mapping[str, Any], cell: Cell, *, kept: Optional[Sequence[Sample]] = None
+) -> list[Sample]:
+    """The exact samples a grid cell was fine-tuned on, rebuilt from the cached pools.
+
+    For the feature suite (HANDBOOK §8.1). ``cfg`` is the grid config the cell was trained
+    under, so the pools are found under its fingerprint. Nothing is generated: a missing
+    pool raises FileNotFoundError, since a regenerated one would not be the data the grid
+    trained on. ``kept`` is the loaded ``data.kept`` dataset; pass it when rebuilding many
+    cells so it is read once.
+    """
+    data = cfg["data"]
+    human = draw_human(load_dataset(data["kept"]) if kept is None else kept, data, cell.seed)[0]
+    pool: list[Sample] = []
+    if cell.ratio > 0:
+        path = pool_path(Path(cfg["pools_dir"]) / config_fingerprint(cfg), cell.type, cell.seed)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{path} is missing. Copy the pools from the machine that ran this grid "
+                "(HANDBOOK §12.3); never regenerate them."
+            )
+        pool = load_dataset(path)
+    return mixture(human, pool, cell)
+
+
 def resample_empty(generate: Generate, tries: int = 5) -> Generate:
     """Re-ask for outputs that come back empty.
 
@@ -338,7 +381,7 @@ def run_grid(
                     humans[cell.seed] = human_for(cell.seed)
                 human = humans[cell.seed]
                 pool = pool_for(cell.type, cell.seed) if cell.ratio > 0 else []
-                mixed = mix(human, pool, ratio=cell.ratio, seed=cell.seed, total=len(human))
+                mixed = mixture(human, pool, cell)
                 texts = [training_text(s) for s in mixed]
                 start = time.monotonic()
                 model = train(texts, cell)
@@ -760,11 +803,7 @@ def _train_all(
 
     @lru_cache(maxsize=None)
     def draw(seed: int) -> tuple[list[Sample], list[Sample]]:
-        rng = random.Random(seed)
-        human = _pick(kept, d["n_train"], lo, hi, rng)  # the spike's Gen-0 draw for this seed
-        used = {s.response for s in human}
-        source = _pick([s for s in kept if s.response not in used], d["n_train"], lo, hi, rng)
-        return human, source
+        return draw_human(kept, d, seed)
 
     def release(model_dir: Path) -> None:
         # ponytail: 60 merged DistilGPT-2 checkpoints are ~20 GB. Keep them

@@ -797,6 +797,31 @@ def test_results_for_cells_outside_the_config_are_ignored(tmp_path, monkeypatch,
     assert spy.plots[-1][0] == 1
 
 
+def test_training_set_rebuilds_exactly_what_each_cell_trained_on(tmp_path, monkeypatch):
+    config, cfg, spy = _setup(tmp_path, monkeypatch, ratios=[0.0, 0.5, 1.0])
+    assert grid.main(["--config", str(config)]) == 0
+    trained = {name: ts for name, ts, _ in spy.trained if not name.startswith("pool_")}
+    n_generated = len(spy.generated)
+
+    kept = load_dataset(cfg["data"]["kept"])
+    for cell in make_cells(cfg["types"], cfg["ratios"], cfg["seeds"]):
+        # a shared ratio-0 baseline was trained once, under the first type's name
+        name = cell.id if cell.ratio > 0 else f"{cfg['types'][0]}_r0_s{cell.seed}"
+        rebuilt = [grid.training_text(s) for s in grid.training_set(cfg, cell, kept=kept)]
+        assert rebuilt == trained[name], cell.id  # same samples, same order
+    assert grid.training_set(cfg, Cell("synthetic", 0.5, 1)) == grid.training_set(
+        cfg, Cell("synthetic", 0.5, 1), kept=kept)  # loading data.kept itself gives the same set
+    assert len(spy.generated) == n_generated  # rebuilding generated nothing
+
+
+def test_training_set_refuses_to_regenerate_a_missing_pool(tmp_path, monkeypatch):
+    _, cfg, spy = _setup(tmp_path, monkeypatch)
+    with pytest.raises(FileNotFoundError, match="never regenerate"):
+        grid.training_set(cfg, Cell("synthetic", 1.0, 0))
+    assert grid.training_set(cfg, Cell("synthetic", 0.0, 0))  # ratio 0 needs no pool
+    assert not spy.generators
+
+
 def test_main_requires_a_zero_ratio(tmp_path, monkeypatch):
     config, cfg, _ = _setup(tmp_path, monkeypatch)
     cfg["ratios"] = [0.5, 1.0]

@@ -356,10 +356,13 @@ the product UI that makes ORIGIN-T usable. **Critical path:** features (§8.1) b
 anything else.
 
 ### 8.1 Feature suite (`src/features/`), by CP1
-Compute per-cell features on each grid cell's **training set**. Rebuild the training set
-deterministically, the way `grid.py` does: `draw(seed)` → pool for the type →
-`mix(human, pool, ratio, seed, total)`. **Import and reuse grid.py's own helpers**, don't
-re-implement them. If one isn't importable, ask Vishnu to expose it (Track C, same day).
+Compute per-cell features on each grid cell's **training set**. Rebuild it with
+`src.finetune.grid.training_set(cfg, cell, kept=...)`: the same draw → cached pool → `mix` code
+the grid trained with (it reproduces all 60 WikiText cells exactly), and it never regenerates
+a pool. Load `cfg` from the grid's YAML, take cells from `make_cells(cfg["types"],
+cfg["ratios"], cfg["seeds"])`, and pass `kept=load_dataset(cfg["data"]["kept"])` so the corpus
+is read once. Train on `training_text(sample)` strings if a feature needs exactly what the
+model saw. Need another helper? Ask Vishnu to expose it (Track C, same day).
 - [ ] `lex.py` (stdlib only): Shannon entropy (unigram), type-token ratio, distinct-1/2/3,
       repetition rate (repeated 3-grams), burstiness (variance/mean of token gaps), mean/var
       length. Hand-rolled. These are cheap and defensible.
