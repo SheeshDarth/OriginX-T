@@ -9,4 +9,4 @@
 3. Ground rules (handbook section 3) and agent guidelines (section 4) are mandatory. Never
    train on the hidden holdout, never change a fingerprinted config key, pre-register rules
    before results, keep heavy imports lazy, and every PR must pass
-   `python -m pytest -q` and `ruff check --isolated --select F src tests`.
+   `python -m pytest -q` and `ruff check --isolated --select F src tests dashboard`.
