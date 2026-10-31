@@ -151,17 +151,26 @@ with the contamination ratio, from 56.6 at ratio 0 to 67.6 (synthetic), 68.4
 (recursive) and 65.4 (paraphrased) at ratio 1, and is already above seed noise at
 ratio 0.25. Recursive is worst at every ratio.
 
-**Open:** the `benchmark_near` curve in #12 does not show leakage (benchmark-item
-perplexity rose instead of falling) because its generator recased whole texts, which
-GPT-2 sees as different text. The generator is fixed
-([#13](https://github.com/SheeshDarth/OriginX-T/pull/13)) but its cells have not been
-re-run: `python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near`.
-GATE 2 does not depend on it.
+**benchmark_near re-run** (2026-10-31, after the recasing fix in
+[#13](https://github.com/SheeshDarth/OriginX-T/pull/13)): training on leaked items now
+lowers benchmark-item perplexity steadily with dose, 61.3 → 59.2 (−3.4%) at ratio 1, so
+memorisation is visible. Its hidden-holdout damage dropped from +8% to +2.4%. GATE 2 is
+unchanged.
+
+**GATE 3 not evaluable** (2026-10-31): all 12 trajectories collapse, so there are no
+healthy runs to measure false alarms against. White-box signals were measured on all 57
+checkpoints: anisotropy falls steadily with contamination (0.935 → ~0.90), against the
+pre-registered direction, while effective rank and dead neurons stay flat. Next: a healthy
+`human_control` arm and a confirmatory GATE 3 on TinyStories, with a rule fixed beforehand
+([HANDBOOK §13](docs/HANDBOOK.md)).
+
+**Working on this repo? Read [docs/HANDBOOK.md](docs/HANDBOOK.md) first.** It is the
+operating manual: tracks, owners, interfaces, checkpoints and rules.
 
 Done so far: the contamination generators, the hidden-holdout safeguards, run logging
 (MLflow), the fine-tuning grid with its results, the white-box signals
 (`src/evaluation/whitebox.py`, [#15](https://github.com/SheeshDarth/OriginX-T/pull/15);
-**not yet measured on the real checkpoints**), the scoring metrics
+measured on all 57 checkpoints), the scoring metrics
 (`src/evaluation/scoring.py`, [#16](https://github.com/SheeshDarth/OriginX-T/pull/16):
 AUROC/AUPRC/F1, bootstrap CIs, ECE, conformal coverage, lead stage) and a per-run table
 joining the two ([#17](https://github.com/SheeshDarth/OriginX-T/pull/17)). Not in the repo

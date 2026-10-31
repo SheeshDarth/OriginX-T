@@ -84,45 +84,45 @@
       "type": "benchmark_near",
       "ratio": 0.25,
       "n_seeds": 3,
-      "holdout_ppl_mean": 57.706890381541164,
-      "holdout_ppl_min": 57.37615672746786,
-      "holdout_ppl_max": 58.04972034813767,
-      "benchmark_ppl_mean": 61.86836830765938,
-      "benchmark_ppl_min": 61.50945226059144,
-      "benchmark_ppl_max": 62.30157865897559
+      "holdout_ppl_mean": 56.844449946458276,
+      "holdout_ppl_min": 56.645618383745656,
+      "holdout_ppl_max": 57.120937517302444,
+      "benchmark_ppl_mean": 60.74707825520511,
+      "benchmark_ppl_min": 60.532047862456,
+      "benchmark_ppl_max": 61.0859326927584
     },
     {
       "type": "benchmark_near",
       "ratio": 0.5,
       "n_seeds": 3,
-      "holdout_ppl_mean": 59.04829318793364,
-      "holdout_ppl_min": 58.85311999247088,
-      "holdout_ppl_max": 59.233504912651796,
-      "benchmark_ppl_mean": 62.814168235890094,
-      "benchmark_ppl_min": 62.60256963638371,
-      "benchmark_ppl_max": 63.00707827124398
+      "holdout_ppl_mean": 56.95158694901286,
+      "holdout_ppl_min": 56.73495569550614,
+      "holdout_ppl_max": 57.19319197982536,
+      "benchmark_ppl_mean": 59.98188923054894,
+      "benchmark_ppl_min": 59.79720959451327,
+      "benchmark_ppl_max": 60.27135501372875
     },
     {
       "type": "benchmark_near",
       "ratio": 0.75,
       "n_seeds": 3,
-      "holdout_ppl_mean": 60.13061172874384,
-      "holdout_ppl_min": 59.96332780600075,
-      "holdout_ppl_max": 60.36299813495492,
-      "benchmark_ppl_mean": 63.47071614663344,
-      "benchmark_ppl_min": 63.261655090704686,
-      "benchmark_ppl_max": 63.86141463904215
+      "holdout_ppl_mean": 57.368342461321866,
+      "holdout_ppl_min": 57.197734195346285,
+      "holdout_ppl_max": 57.50031226041687,
+      "benchmark_ppl_mean": 59.59927513550546,
+      "benchmark_ppl_min": 59.46578580977368,
+      "benchmark_ppl_max": 59.70060086754877
     },
     {
       "type": "benchmark_near",
       "ratio": 1.0,
       "n_seeds": 3,
-      "holdout_ppl_mean": 61.22271303127716,
-      "holdout_ppl_min": 61.04541497979565,
-      "holdout_ppl_max": 61.55252213582663,
-      "benchmark_ppl_mean": 64.22424498414252,
-      "benchmark_ppl_min": 63.93222547315481,
-      "benchmark_ppl_max": 64.7051159371498
+      "holdout_ppl_mean": 57.96112503271206,
+      "holdout_ppl_min": 57.890544086216046,
+      "holdout_ppl_max": 58.03838318908609,
+      "benchmark_ppl_mean": 59.239293701777484,
+      "benchmark_ppl_min": 59.09327979205981,
+      "benchmark_ppl_max": 59.37415947921778
     },
     {
       "type": "paraphrased",
@@ -595,34 +595,35 @@
     {
       "ratio": 0.25,
       "n_seeds": 3,
-      "benchmark_ppl_mean": 61.86836830765938,
-      "delta_vs_ratio0": 0.5536817685047026,
-      "relative_delta": 0.009030165524064548
+      "benchmark_ppl_mean": 60.74707825520511,
+      "delta_vs_ratio0": -0.5676082839495677,
+      "relative_delta": -0.009257297329361758
     },
     {
       "ratio": 0.5,
       "n_seeds": 3,
-      "benchmark_ppl_mean": 62.814168235890094,
-      "delta_vs_ratio0": 1.4994816967354154,
-      "relative_delta": 0.024455506198794108
+      "benchmark_ppl_mean": 59.98188923054894,
+      "delta_vs_ratio0": -1.3327973086057412,
+      "relative_delta": -0.021736999466753115
     },
     {
       "ratio": 0.75,
       "n_seeds": 3,
-      "benchmark_ppl_mean": 63.47071614663344,
-      "delta_vs_ratio0": 2.1560296074787644,
-      "relative_delta": 0.03516334713873093
+      "benchmark_ppl_mean": 59.59927513550546,
+      "delta_vs_ratio0": -1.7154114036492203,
+      "relative_delta": -0.027977169915951228
     },
     {
       "ratio": 1.0,
       "n_seeds": 3,
-      "benchmark_ppl_mean": 64.22424498414252,
-      "delta_vs_ratio0": 2.9095584449878373,
-      "relative_delta": 0.047452879713081986
+      "benchmark_ppl_mean": 59.239293701777484,
+      "delta_vs_ratio0": -2.075392837377194,
+      "relative_delta": -0.03384821736064614
     }
   ],
   "gate_2_status": "passed",
   "gate_2_passed": true,
   "complete": true,
-  "missing_cells": []
+  "missing_cells": [],
+  "stale_cells": []
 }

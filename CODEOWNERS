@@ -1,15 +1,23 @@
 # ORIGIN-T code ownership (contribution audit)
-# Role mapping (see docs/PROJECT_REPORT.md section 5):
-#   @SheeshDarth   -> S1  Data & Bench Lead        (contamination pipeline, ORIGIN-T-Bench, hidden holdout)
-#   @Revanthm2027  -> S2  Modeling Lead            (feature suite, risk models, calibration/conformal)
-#   @vishnu-k-dev  -> S3  Experiments/Infra Lead   (fine-tuning runner, eval harness, reproducibility)
+# Role mapping (see docs/HANDBOOK.md section 5, which this file must match):
+#   @SheeshDarth   -> S1  Track B: Data, Repair & Bench   (contamination pipeline, ORIGIN-T-Bench, hidden holdout, mitigation/repair)
+#   @Revanthm2027  -> S2  Track A: Modeling & Product UI  (feature suite, risk models, calibration/conformal, web UI)
+#   @vishnu-k-dev  -> S3  Track C: Infra, Experiments & API (fine-tuning runner, eval harness, API, model/semantic features)
+#
+# GitHub uses the LAST matching pattern, so specific paths come after general ones.
 
 /src/ingestion/    @SheeshDarth
 /src/generation/   @SheeshDarth
 /src/features/     @SheeshDarth @Revanthm2027
+/src/features/model.py      @vishnu-k-dev
+/src/features/semantic.py   @vishnu-k-dev
 /src/finetune/     @vishnu-k-dev
 /src/evaluation/   @vishnu-k-dev
 /src/risk/         @Revanthm2027
-/src/mitigation/   @Revanthm2027
-/dashboard/        @vishnu-k-dev
+/src/mitigation/   @SheeshDarth
+/dashboard/api/    @vishnu-k-dev
+/dashboard/web/    @Revanthm2027
+/dashboard/web/src/routes/monitor/   @vishnu-k-dev @Revanthm2027
+/dashboard/web/src/routes/canary/    @vishnu-k-dev @Revanthm2027
 /docs/             @SheeshDarth @Revanthm2027 @vishnu-k-dev
+/CODEOWNERS        @SheeshDarth @Revanthm2027 @vishnu-k-dev
