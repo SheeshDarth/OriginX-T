@@ -323,8 +323,19 @@ input**).
 
 ### 7.6 Training-signal logs: Track C produces (X3, consumed by X2 and the UI)
 `reports/trainlogs/<run_id>.jsonl`, one row every N steps:
-`{"schema":"trainlog/1","run_id","step","holdout_loss","sig_anisotropy_last",
-"sig_eff_rank_last",...,"alarm":false,"alarm_signal":null}`.
+```json
+{"schema":"trainlog/1","run_id":"wikitext2_synthetic_r1_s0","step":125,"holdout_loss":4.18,
+ "sig_eff_rank_last":373.8,"sig_part_ratio_last":2.06,"sig_anisotropy_last":0.917,
+ "sig_dead_fraction_mean":0.0054,"sig_stable_rank_attn":89.8,"sig_delta_rel_norm":0.0033,
+ "alarm":true,"alarm_signal":"sig_anisotropy_last"}
+```
+- `run_id` = `<dataset>_<cell>`; `step` = optimizer step (int, increasing); `holdout_loss` = mean
+  token cross-entropy on the hidden holdout (nats; perplexity = e^loss).
+- `sig_*` = the six GATE 3 signals, named as in `whitebox.jsonl`'s `headline`; float or `null`.
+- `alarm` latches: from the first row where it fires it stays `true`, and `alarm_signal` names
+  the `sig_*` that fired it (`null` while `alarm` is `false`).
+- Fixture: `tests/fixtures/trainlog.jsonl` (a quiet ratio-0 run and a ratio-1 run whose alarm
+  fires), checked by `tests/test_trainlog_fixture.py`.
 
 ### 7.7 HTTP API: Track C produces, Track A consumes
 FastAPI, read-only over `reports/**` plus job endpoints. The **OpenAPI spec is the contract**:
