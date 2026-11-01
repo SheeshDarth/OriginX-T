@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi import Path as PathParam
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -25,7 +27,7 @@ from src.ingestion.loaders import normalize_record
 from src.ingestion.schema import Sample
 
 REPO = Path(__file__).resolve().parents[2]
-API_VERSION = "1.1.0"  # 1.1: POST /v1/audits, GET /v1/audits/{id}
+API_VERSION = "1.3.0"  # 1.1: audits; 1.2: GET /v1/runs/{id}/stream; 1.3: GET /v1/risk/evaluation
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
@@ -34,6 +36,8 @@ GRID_CONFIGS: dict[str, str] = {"wikitext2": "configs/grid.yaml", "tinystories":
 DEPLOYED_MODEL = "reports/risk/model.json"  # written by python -m src.risk.classifier
 MAX_UPLOAD_BYTES = 20 * 2**20
 MAX_SAMPLES = 20_000
+STREAM_POLL_SECONDS = 0.5   # how often a stream checks its trainlog for new rows
+STREAM_IDLE_SECONDS = 60.0  # a log quiet this long is a finished run: the stream ends
 AuditId = Annotated[str, PathParam(pattern=r"^[0-9a-f]{32}$")]
 # a file name, never a path: no separators, no leading dot
 RunId = Annotated[str, PathParam(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
@@ -141,6 +145,71 @@ class RiskPrediction(Model):
     alpha: float
     model: str
     split: Literal["train", "cal", "test"]
+
+
+class Estimate(Model):
+    value: Optional[float] = None
+    ci95: Optional[list[float]] = None
+
+
+class ReliabilityBin(Model):
+    lo: float
+    hi: float
+    n: int
+    confidence: float
+    accuracy: float
+
+
+class ConformalCoverage(Model):
+    alpha: float
+    target: float
+    coverage: Estimate
+    mean_set_size: float
+    n_cal_per_fold: list[int] = []
+
+
+class RiskScores(Model):
+    """How the risk model scores on held-out groups (``src.risk.classifier.evaluate``)."""
+
+    n: int
+    n_degraded: int
+    auroc: Optional[Estimate] = None
+    auprc: Optional[Estimate] = None
+    ece: Optional[float] = None
+    reliability: list[ReliabilityBin] = []
+    conformal: Optional[ConformalCoverage] = None
+
+
+class BaselineComparison(Model):
+    column: str
+    n: int
+    auroc_model: float
+    auroc_baseline: float
+    difference: Estimate
+    model_beats_baseline: bool
+
+
+class RiskBaselines(Model):
+    ref_lm_loss: Optional[BaselineComparison] = None   # H2: the model vs one reference-LM feature
+    single_feature_auroc: dict[str, Optional[float]] = {}
+
+
+class Gate1(Model):
+    status: Literal["passed", "failed", "not_evaluable"]
+    rule: str
+    datasets: list[str]
+
+
+class RiskEvaluation(Model):
+    """``reports/risk/evaluation.json`` (``python -m src.risk.classifier``): GATE 1's numbers."""
+
+    model: str
+    label: str
+    features: list[str]
+    leave_one_type_out: RiskScores
+    leave_one_dataset_out: Optional[RiskScores] = None
+    baselines: RiskBaselines
+    gate_1: Gate1
 
 
 class RepairResult(Model):
@@ -309,7 +378,18 @@ def _gates(reports: Reports) -> list[Gate]:
     out.append(gate("gate_0", "pending") if spike is None else gate(
         "gate_0", "passed" if spike["gate_0_passed"] else "failed",
         details={"per_seed": spike["gate_0_per_seed"]}, source="reports/collapse_spike/metrics.json"))
-    out.append(gate("gate_1", "pending"))
+    ev = reports.json_or_none("reports/risk/evaluation.json")
+    if ev is None:
+        out.append(gate("gate_1", "pending"))
+    else:
+        lt, base = ev["leave_one_type_out"], ev["baselines"].get("ref_lm_loss") or {}
+        conformal = lt.get("conformal") or {}
+        g1 = gate("gate_1", ev["gate_1"]["status"], source="reports/risk/evaluation.json", details={
+            "datasets": ev["gate_1"]["datasets"], "auroc": (lt.get("auroc") or {}).get("value"),
+            "ece": lt.get("ece"), "coverage": (conformal.get("coverage") or {}).get("value"),
+            "coverage_target": conformal.get("target"),
+            "beats_ref_lm_baseline": base.get("model_beats_baseline")})
+        out.append(g1.model_copy(update={"rule": ev["gate_1"]["rule"]}))
     for dataset, folder in GRID_DIRS.items():
         summary = reports.json_or_none(f"{folder}/summary.json")
         if summary is not None:
@@ -331,14 +411,22 @@ def _with_prefix(row: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {k[len(prefix):]: v for k, v in row.items() if k.startswith(prefix)}
 
 
+def _trainlog_row(r: dict[str, Any]) -> dict[str, Any]:
+    """A trainlog/1 file row as the API serves it (``TrainlogRow``)."""
+    return {"run_id": r["run_id"], "step": r["step"], "holdout_loss": r["holdout_loss"],
+            "signals": _with_prefix(r, "sig_"), "alarm": r["alarm"],
+            "alarm_signal": r["alarm_signal"] and r["alarm_signal"].removeprefix("sig_")}
+
+
 # ---------------------------------------------------------------- audit jobs
 
-# (samples, deployed model, benchmark texts) -> (audit/1 report, per-sample score rows)
-Runner = Callable[[list[Sample], Mapping[str, Any], list[str]], tuple[dict[str, Any], list[dict[str, Any]]]]
+# (samples, deployed model, benchmark texts, reference texts) -> (audit/1 report, per-sample score rows)
+Runner = Callable[[list[Sample], Mapping[str, Any], list[str], list[str]],
+                  tuple[dict[str, Any], list[dict[str, Any]]]]
 
 
-def run_audit(samples: list[Sample], deployed: Mapping[str, Any],
-              bench: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def run_audit(samples: list[Sample], deployed: Mapping[str, Any], bench: list[str],
+              reference: list[str] = ()) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The audit/1 report (``src.risk.audit``) and the two per-sample risk scores (§7.3)."""
     from src.features import model as reflm
     from src.features import semantic
@@ -347,7 +435,7 @@ def run_audit(samples: list[Sample], deployed: Mapping[str, Any],
     from src.risk.audit import audit
 
     texts, ids = [training_text(s) for s in samples], [s.sample_id for s in samples]
-    report = audit(texts, ids, deployed, bench)
+    report = audit(texts, ids, deployed, bench, reference)
     ctx = {"device": _device("auto")}
     scores: list[dict[str, Any]] = []
     for method, per_text, value in (
@@ -429,7 +517,7 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
 
     @app.get("/v1/gates", response_model=list[Gate], tags=["gates"])
     def gates(request: Request, response: Response) -> Any:
-        files = ["reports/collapse_spike/metrics.json",
+        files = ["reports/collapse_spike/metrics.json", "reports/risk/evaluation.json",
                  *(f"{d}/{n}" for d in GRID_DIRS.values() for n in ("summary.json", "earlywarning.json"))]
         return _cached(request, response, reports.etag(*files)) or _gates(reports)
 
@@ -460,6 +548,12 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
         rel = "reports/risk/predictions.jsonl"
         return _cached(request, response, reports.etag(rel)) or reports.jsonl(rel)
 
+    @app.get("/v1/risk/evaluation", response_model=RiskEvaluation, tags=["risk"])
+    def risk_evaluation(request: Request, response: Response) -> Any:
+        """The risk model's held-out AUROC/AUPRC/ECE, conformal coverage, baselines and GATE 1."""
+        rel = "reports/risk/evaluation.json"
+        return _cached(request, response, reports.etag(rel)) or reports.json(rel)
+
     @app.get("/v1/repair/{dataset}", response_model=list[RepairResult], tags=["repair"])
     def repair(dataset: Dataset, request: Request, response: Response) -> Any:
         rel = f"reports/repair/{dataset}.jsonl"
@@ -468,10 +562,50 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
     @app.get("/v1/runs/{run_id}/trainlog", response_model=list[TrainlogRow], tags=["runs"])
     def trainlog(run_id: RunId, request: Request, response: Response) -> Any:
         rel = f"reports/trainlogs/{run_id}.jsonl"
-        return _cached(request, response, reports.etag(rel)) or [
-            {**r, "signals": _with_prefix(r, "sig_"),
-             "alarm_signal": r["alarm_signal"] and r["alarm_signal"].removeprefix("sig_")}
-            for r in reports.jsonl(rel)]
+        return _cached(request, response, reports.etag(rel)) or [_trainlog_row(r) for r in reports.jsonl(rel)]
+
+    stream_doc = {200: {"description": "Server-Sent Events: `event: row` (`id` = step, `data` = one "
+                        "TrainlogRow as JSON) for every logged row, existing ones first, then live; "
+                        "`event: reset` if a new run restarts the log; `event: end` once the log has "
+                        "been quiet for a while (a finished run ends right after its replay). "
+                        "Send `Last-Event-ID` to resume after a step.",
+                        "content": {"text/event-stream": {"schema": {"type": "string"}}}}}
+
+    @app.get("/v1/runs/{run_id}/stream", tags=["runs"], response_class=StreamingResponse,
+             response_model=None, responses=stream_doc)
+    async def trainlog_stream(run_id: RunId, request: Request) -> StreamingResponse:
+        """The run's trainlog as it is written (X3 live monitor)."""
+        path = reports.path(f"reports/trainlogs/{run_id}.jsonl")
+        if not path.is_file():
+            raise HTTPException(404, f"reports/trainlogs/{run_id}.jsonl has not been produced yet")
+        last = request.headers.get("last-event-id", "")
+        after = int(last) if last.isdigit() else -1
+
+        async def events() -> Any:
+            pos, buf, after_step = 0, "", after
+            while not await request.is_disconnected():
+                size = path.stat().st_size if path.exists() else 0
+                if size < pos:  # truncated: a new run started this log, so send it all
+                    pos, buf, after_step = 0, "", -1
+                    yield "event: reset\ndata: {}\n\n"
+                if size > pos:
+                    with path.open("rb") as fh:
+                        fh.seek(pos)
+                        chunk = fh.read(size - pos)
+                    pos += len(chunk)
+                    *lines, buf = (buf + chunk.decode("utf-8")).split("\n")
+                    for line in lines:
+                        if line.strip():
+                            row = _trainlog_row(json.loads(line))
+                            if row["step"] > after_step:
+                                yield f"id: {row['step']}\nevent: row\ndata: {json.dumps(row)}\n\n"
+                elif not path.exists() or time.time() - path.stat().st_mtime > STREAM_IDLE_SECONDS:
+                    yield "event: end\ndata: {}\n\n"
+                    return
+                await asyncio.sleep(STREAM_POLL_SECONDS)
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     @app.get("/v1/bench/samples", response_model=list[BenchSample], tags=["bench"])
     def bench_samples(
@@ -496,10 +630,11 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
         with lock:
             jobs[job_id] = {**jobs[job_id], **fields}
 
-    def work(job_id: str, samples: list[Sample], deployed: Mapping[str, Any], bench: list[str]) -> None:
+    def work(job_id: str, samples: list[Sample], deployed: Mapping[str, Any], bench: list[str],
+             reference: list[str]) -> None:
         update(job_id, status="running")
         try:
-            report, scores = run(samples, deployed, bench)
+            report, scores = run(samples, deployed, bench, reference)
             update(job_id, status="done", report=report, scores=scores, finished_at=_now())
         except Exception as e:  # the client sees it as the job's error
             update(job_id, status="failed", error=f"{type(e).__name__}: {e}"[:500], finished_at=_now())
@@ -534,11 +669,13 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
                                      "run python -m src.risk.classifier")
         deployed = json.loads(model_file.read_text(encoding="utf-8"))
         bench: list[str] = []
+        reference: list[str] = []  # the sem family's reference comes with the grid's data
         if benchmark:
-            from src.risk.audit import grid_benchmark
+            from src.risk.audit import grid_benchmark, grid_reference
 
             try:
                 bench = grid_benchmark(reports.path(GRID_CONFIGS[benchmark]))
+                reference = grid_reference(reports.path(GRID_CONFIGS[benchmark]))
             except (OSError, KeyError) as e:
                 raise HTTPException(503, f"the {benchmark} benchmark data is not on this server "
                                          f"({type(e).__name__})") from None
@@ -547,7 +684,7 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
                "benchmark": benchmark, "created_at": _now()}
         with lock:
             jobs[job_id] = job
-        worker.submit(work, job_id, samples, deployed, bench)
+        worker.submit(work, job_id, samples, deployed, bench, reference)
         response.headers["Location"] = f"/v1/audits/{job_id}"
         return job
 

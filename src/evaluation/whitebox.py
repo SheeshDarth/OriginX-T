@@ -267,12 +267,15 @@ def model_signals(
     eps: float = 0.01,
     exclude_first_token: bool = True,
     base_weights: Optional[Mapping[str, Any]] = None,
+    weight_signals: bool = True,
 ) -> dict[str, Any]:
     """All signals for one model, from ``batches`` of ``(input_ids, attention_mask)`` tensors.
 
     The model must already be in eval mode on the device the tensors are on. Padding is
     never counted: tokens are selected by the attention mask, so the result does not
-    depend on how the texts were batched.
+    depend on how the texts were batched. ``weight_signals=False`` skips the weight-matrix
+    SVDs (most of the cost) and returns only the representation and MLP signals; the live
+    monitor (``src.evaluation.live``) computes the weight signals it needs itself.
     """
     import numpy as np
     import torch
@@ -313,6 +316,8 @@ def model_signals(
 
     layers = [{"layer": i, **s.result()} for i, s in enumerate(layer_stats)]
     mlp = [{"block": i, "dead_fraction": a.dead_fraction(eps)} for i, a in enumerate(act_max)]
+    if not weight_signals:
+        return {"n_tokens": layers[-1]["n_tokens"], "layers": layers, "mlp": mlp}
 
     weights = block_weights(model)
     per_kind: dict[str, dict[str, float]] = {}
@@ -353,9 +358,10 @@ def headline(signals: Mapping[str, Any]) -> dict[str, Optional[float]]:
         "anisotropy_last": last["anisotropy"],
         "anisotropy_mean": sum(l["anisotropy"] for l in layers) / len(layers),
         "dead_fraction_mean": sum(m["dead_fraction"] for m in signals["mlp"]) / len(signals["mlp"]),
-        "stable_rank_attn": signals["weights"]["attn_qkv"]["stable_rank"],
-        "stable_rank_mlp": signals["weights"]["mlp_in"]["stable_rank"],
     }
+    if "weights" in signals:  # absent when measured with weight_signals=False
+        out["stable_rank_attn"] = signals["weights"]["attn_qkv"]["stable_rank"]
+        out["stable_rank_mlp"] = signals["weights"]["mlp_in"]["stable_rank"]
     if "delta" in signals:
         out["delta_rel_norm"] = signals["delta"]["rel_norm"]
         out["delta_eff_rank"] = signals["delta"]["effective_rank"]

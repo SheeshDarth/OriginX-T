@@ -27,6 +27,8 @@ def root(tmp_path):
     """A repo root holding the committed grid reports plus §7 rows for what isn't produced yet."""
     for rel in ("reports/grid", "reports/collapse_spike"):
         shutil.copytree(REPO / rel, tmp_path / rel)
+    (tmp_path / "reports/risk").mkdir(parents=True)
+    shutil.copy(REPO / "reports/risk/evaluation.json", tmp_path / "reports/risk/evaluation.json")
     runs = {}
     for line in (FIXTURES / "trainlog.jsonl").read_text(encoding="utf-8").splitlines():
         runs.setdefault(json.loads(line)["run_id"], []).append(json.loads(line))
@@ -63,6 +65,7 @@ URLS = {
     "/v1/grids/{dataset}/whitebox": "/v1/grids/wikitext2/whitebox",
     "/v1/features/{dataset}": "/v1/features/wikitext2",
     "/v1/risk": "/v1/risk",
+    "/v1/risk/evaluation": "/v1/risk/evaluation",
     "/v1/repair/{dataset}": "/v1/repair/wikitext2",
     "/v1/runs/{run_id}/trainlog": "/v1/runs/wikitext2_synthetic_r1_s0/trainlog",
     "/v1/bench/samples": "/v1/bench/samples?dataset=wikitext2&type=synthetic&ratio=0.5",
@@ -75,8 +78,8 @@ def test_committed_openapi_json_matches_the_code():
         "(and remember v1 is frozen: additive changes only)")
 
 
-# the audit job routes have their own tests below
-AUDIT_PATHS = {"/v1/audits", "/v1/audits/{audit_id}"}
+# the audit job routes and the SSE stream have their own tests below
+AUDIT_PATHS = {"/v1/audits", "/v1/audits/{audit_id}", "/v1/runs/{run_id}/stream"}  # + the SSE stream
 
 
 def test_every_route_in_the_spec_returns_schema_valid_data(client):
@@ -96,6 +99,13 @@ def test_shapes_the_ui_relies_on(client):
     assert gates[("gate_2", "wikitext2")]["status"] == "passed"
     assert gates[("gate_3", "wikitext2")]["exploratory"] is True
     assert {g["id"] for g in gates.values()} == {"gate_0", "gate_1", "gate_2", "gate_3", "x1", "x2", "x3"}
+    g1 = gates[("gate_1", None)]  # from reports/risk/evaluation.json, one dataset so far
+    assert g1["status"] == "not_evaluable" and g1["source"] == "reports/risk/evaluation.json"
+    assert 0 < g1["details"]["auroc"] < 1 and g1["details"]["coverage_target"] == 0.9
+    assert ">= 2 datasets" in g1["rule"]
+    ev = client.get("/v1/risk/evaluation").json()
+    assert ev["leave_one_type_out"]["auroc"]["value"] == g1["details"]["auroc"]
+    assert ev["baselines"]["ref_lm_loss"]["model_beats_baseline"] is g1["details"]["beats_ref_lm_baseline"]
 
     log = client.get("/v1/runs/wikitext2_synthetic_r1_s0/trainlog").json()
     assert set(log[0]["signals"]) == {"eff_rank_last", "part_ratio_last", "anisotropy_last",
@@ -174,8 +184,8 @@ def audits(root):
     (root / "reports/risk/model.json").write_text(json.dumps(DEPLOYED), encoding="utf-8")
     calls = []
 
-    def runner(samples, deployed, bench):
-        calls.append((samples, deployed, bench))
+    def runner(samples, deployed, bench, reference):
+        calls.append((samples, deployed, bench, reference))
         if samples[0].response == "boom":
             raise RuntimeError("the model fell over")
         return _report(len(samples)), [{"sample_id": s.sample_id, "method": "risk_reflm", "score": -3.0}
@@ -209,9 +219,20 @@ def test_an_upload_becomes_a_job_that_finishes_with_a_typed_report(audits):
     assert done["report"]["schema"] == "audit/1" and report.p_degrade == 0.7
     assert [s["sample_id"] for s in done["scores"]] == ["a", "my data-0000001"]
     assert done["scores"][0]["higher_is"] == "worse"
-    samples, deployed, bench = calls[0]
+    samples, deployed, bench, reference = calls[0]
     assert [s.response for s in samples] == ["the cat sat on the mat", "an answer"]  # same aliases as files
-    assert deployed == DEPLOYED and bench == []
+    assert deployed == DEPLOYED and bench == [] and reference == []
+
+
+def test_a_benchmark_brings_its_grid_s_reference_for_the_sem_features(audits, monkeypatch):
+    from src.risk import audit as audit_mod
+
+    client, calls = audits
+    monkeypatch.setattr(audit_mod, "grid_benchmark", lambda cfg: ["leaked item"])
+    monkeypatch.setattr(audit_mod, "grid_reference", lambda cfg: ["clean human text"])
+    r = client.post("/v1/audits?benchmark=wikitext2", content=JSONL)
+    assert _finish(client, r.headers["location"])["status"] == "done"
+    assert calls[0][2:] == (["leaked item"], ["clean human text"])
 
 
 def test_a_failing_audit_is_reported_not_raised(audits):
@@ -290,3 +311,91 @@ def test_the_default_runner_wires_the_audit_and_both_scores(monkeypatch):
                       {"sample_id": "y", "method": "risk_reflm", "score": None},
                       {"sample_id": "x", "method": "risk_knn", "score": -0.25},
                       {"sample_id": "y", "method": "risk_knn", "score": -0.5}]
+
+# ---------------------------------------------------------------- the trainlog SSE stream (#36)
+
+RUN = "wikitext2_synthetic_r1_s0"
+
+
+def _events(response):
+    """Parse an SSE body into (event, id, data) triples."""
+    out, cur = [], {}
+    for line in response.iter_lines():
+        if not line:
+            if cur:
+                out.append((cur.get("event"), cur.get("id"), json.loads(cur.get("data", "null"))))
+            cur = {}
+        elif not line.startswith(":"):
+            key, _, value = line.partition(": ")
+            cur[key] = value
+    return out
+
+
+@pytest.fixture
+def fast_stream(monkeypatch):
+    monkeypatch.setattr(api, "STREAM_POLL_SECONDS", 0.02)
+    monkeypatch.setattr(api, "STREAM_IDLE_SECONDS", 0.3)
+
+
+def _age(path, seconds=10):
+    import os
+    import time
+
+    os.utime(path, (time.time() - seconds, time.time() - seconds))
+
+
+def test_a_finished_run_replays_every_row_then_ends(client, root, fast_stream):
+    _age(root / f"reports/trainlogs/{RUN}.jsonl")
+    with client.stream("GET", f"/v1/runs/{RUN}/stream") as r:
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+        events = _events(r)
+    rows = [e for e in events if e[0] == "row"]
+    assert [int(i) for _, i, _ in rows] == list(range(0, 250, 25))
+    assert rows[5][2]["alarm"] and rows[5][2]["alarm_signal"] == "anisotropy_last"  # same shape as /trainlog
+    assert rows[0][2] == client.get(f"/v1/runs/{RUN}/trainlog").json()[0]
+    assert events[-1][0] == "end"
+
+
+def test_last_event_id_resumes_after_that_step(client, root, fast_stream):
+    _age(root / f"reports/trainlogs/{RUN}.jsonl")
+    with client.stream("GET", f"/v1/runs/{RUN}/stream", headers={"Last-Event-ID": "175"}) as r:
+        steps = [int(i) for e, i, _ in _events(r) if e == "row"]
+    assert steps == [200, 225]
+
+
+def test_rows_written_during_the_stream_arrive_live_and_a_restart_resets(client, root, fast_stream,
+                                                                         monkeypatch):
+    import threading
+    import time
+
+    monkeypatch.setattr(api, "STREAM_IDLE_SECONDS", 1.0)  # well above the writer's 0.1 s gaps, even on slow CI
+    path = root / "reports/trainlogs/live_run.jsonl"
+    first = json.loads((root / f"reports/trainlogs/{RUN}.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+    def row(step):
+        return json.dumps({**first, "run_id": "live_run", "step": step}) + "\n"
+
+    path.write_text(row(0), encoding="utf-8")
+
+    def writer():
+        time.sleep(0.1)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(row(10))
+        time.sleep(0.1)
+        path.write_text(row(0), encoding="utf-8")  # a new run truncates the log
+        time.sleep(0.1)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(row(5))
+
+    t = threading.Thread(target=writer)
+    t.start()
+    with client.stream("GET", "/v1/runs/live_run/stream") as r:
+        events = [(e, i) for e, i, _ in _events(r)]
+    t.join()
+    assert events == [("row", "0"), ("row", "10"), ("reset", None), ("row", "0"), ("row", "5"), ("end", None)]
+
+
+def test_stream_errors_are_problem_json(client):
+    assert client.get("/v1/runs/missing_run/stream").status_code == 404
+    r = client.get("/v1/runs/.hidden/stream")
+    assert r.status_code == 422 and r.headers["content-type"] == "application/problem+json"

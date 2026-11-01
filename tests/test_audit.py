@@ -67,3 +67,12 @@ def test_cli(tmp_path, capsys):
     report = json.loads((tmp_path / "a.json").read_text(encoding="utf-8"))
     assert report["n_samples"] == 2 and report["n_flagged"] == 1
     assert "1 of 2 samples flagged" in capsys.readouterr().out
+
+
+def test_a_reference_reaches_the_families_and_none_leaves_it_out(monkeypatch):
+    seen = []
+    monkeypatch.setattr("src.risk.audit.FAMILIES", {"spy": (lambda texts, ctx: seen.append(dict(ctx)) or {"x": 1.0}, 1)})
+    audit(["a b"], ["s0"], _deployed(), BENCH, ["clean"])
+    audit(["a b"], ["s0"], _deployed(), BENCH)
+    assert seen[0]["reference_texts"] == ["clean"] and seen[0]["benchmark"] == BENCH
+    assert "reference_texts" not in seen[1]  # the sem family then reports its reference columns as missing
