@@ -3,6 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { api, unwrap, type Dataset, type GridResult } from "../api/client";
 import { TYPE_COLORS } from "../components/charts";
 import { QueryView } from "../components/QueryView";
+import { RiskPanel } from "../components/RiskPanel";
 
 const fmt = (v: number | null | undefined, d = 3) =>
   v == null ? "—" : v.toFixed(d);
@@ -98,6 +99,7 @@ export function CellDetail() {
         dataset features and training samples.
       </p>
 
+      <RiskPanel dataset={dataset} cell={cell} />
       <div className="grid gap-6 md:grid-cols-3">
         <div>
           <h2 className="mb-2 text-sm font-semibold">Outcome</h2>
