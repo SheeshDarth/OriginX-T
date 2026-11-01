@@ -596,14 +596,20 @@ alarm and the canary.
       `reports/risk/model.json` exists. Jobs are in memory (lost on restart).
 
 ### 10.4 X3: live collapse alarm, by CP2 (cut-off 2027-01-15)
-- [ ] `src/evaluation/live.py`: a HF `TrainerCallback` **and** a hook for our `train_lora`
+- [x] `src/evaluation/live.py`: a HF `TrainerCallback` **and** a hook for our `train_lora`
       loop. Every N steps, compute white-box signals on a fixed probe set (reuse
-      `whitebox.py`) → §7.6 trainlog, plus SSE events.
+      `whitebox.py`) → §7.6 trainlog, plus SSE events. Done (#36): `TrainLogger` (pass it as
+      `train_lora(on_step=...)` or via `trainer_callback`), probe = the grid's hidden holdout
+      texts, weight signals from the effective (frozen + LoRA) weights on the GPU, ~3 s per
+      row; logging is bit-for-bit neutral (tested). `GET /v1/runs/{id}/stream` tails the file
+      as SSE (`row` / `reset` / `end`, `Last-Event-ID` resumes).
 - [ ] Monitors are **two-sided** (signals can move either way; anisotropy *falls* in our data).
 - [ ] Calibrate the alarm threshold on healthy (`human_control` / ratio-0) runs with split
       conformal, and report the false-alarm rate on held-out healthy seeds. Optionally use the
       dataset risk from Track A as a prior (tighter monitoring for risky data).
-- [ ] Re-run a subset of the grid with logging on, so curves over *training steps* exist.
+- [x] Re-run a subset of the grid with logging on, so curves over *training steps* exist.
+      `python -m src.evaluation.live --preset x3`: all five types at ratio 1 + the clean
+      baseline, 3 seeds (18 runs, grid seeds) → `reports/trainlogs/wikitext2_<cell>.jsonl`.
 
 ### 10.5 X2: canary, by CP2 (cut-off 2026-12-15)
 - [ ] Target model Pythia-410M (or Qwen2.5-0.5B) on **Siddharth's GPU** (§12.2). With ≥ 16 GB,

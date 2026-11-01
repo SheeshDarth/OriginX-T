@@ -194,6 +194,43 @@
         "title": "AuditReport",
         "type": "object"
       },
+      "BaselineComparison": {
+        "properties": {
+          "auroc_baseline": {
+            "title": "Auroc Baseline",
+            "type": "number"
+          },
+          "auroc_model": {
+            "title": "Auroc Model",
+            "type": "number"
+          },
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "difference": {
+            "$ref": "#/components/schemas/Estimate"
+          },
+          "model_beats_baseline": {
+            "title": "Model Beats Baseline",
+            "type": "boolean"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "column",
+          "n",
+          "auroc_model",
+          "auroc_baseline",
+          "difference",
+          "model_beats_baseline"
+        ],
+        "title": "BaselineComparison",
+        "type": "object"
+      },
       "BenchSample": {
         "properties": {
           "benchmark_near_score": {
@@ -240,6 +277,41 @@
           "split"
         ],
         "title": "BenchSample",
+        "type": "object"
+      },
+      "ConformalCoverage": {
+        "properties": {
+          "alpha": {
+            "title": "Alpha",
+            "type": "number"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Estimate"
+          },
+          "mean_set_size": {
+            "title": "Mean Set Size",
+            "type": "number"
+          },
+          "n_cal_per_fold": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "N Cal Per Fold",
+            "type": "array"
+          },
+          "target": {
+            "title": "Target",
+            "type": "number"
+          }
+        },
+        "required": [
+          "alpha",
+          "target",
+          "coverage",
+          "mean_set_size"
+        ],
+        "title": "ConformalCoverage",
         "type": "object"
       },
       "Contribution": {
@@ -324,6 +396,37 @@
           "benchmark_ppl_max"
         ],
         "title": "Curve",
+        "type": "object"
+      },
+      "Estimate": {
+        "properties": {
+          "ci95": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci95"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "Estimate",
         "type": "object"
       },
       "FeatureRow": {
@@ -530,6 +633,37 @@
         "title": "Gate",
         "type": "object"
       },
+      "Gate1": {
+        "properties": {
+          "datasets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "not_evaluable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "rule",
+          "datasets"
+        ],
+        "title": "Gate1",
+        "type": "object"
+      },
       "GridResult": {
         "description": "One grid cell's outcome (\u00a77.1).",
         "properties": {
@@ -661,6 +795,39 @@
         "title": "Problem",
         "type": "object"
       },
+      "ReliabilityBin": {
+        "properties": {
+          "accuracy": {
+            "title": "Accuracy",
+            "type": "number"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "hi": {
+            "title": "Hi",
+            "type": "number"
+          },
+          "lo": {
+            "title": "Lo",
+            "type": "number"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lo",
+          "hi",
+          "n",
+          "confidence",
+          "accuracy"
+        ],
+        "title": "ReliabilityBin",
+        "type": "object"
+      },
       "RepairResult": {
         "description": "\u00a77.5. ``recovery`` = (ppl_contaminated - ppl_repaired) / (ppl_contaminated - ppl_clean).",
         "properties": {
@@ -726,6 +893,86 @@
         "title": "RepairResult",
         "type": "object"
       },
+      "RiskBaselines": {
+        "properties": {
+          "ref_lm_loss": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BaselineComparison"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "single_feature_auroc": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "default": {},
+            "title": "Single Feature Auroc",
+            "type": "object"
+          }
+        },
+        "title": "RiskBaselines",
+        "type": "object"
+      },
+      "RiskEvaluation": {
+        "description": "``reports/risk/evaluation.json`` (``python -m src.risk.classifier``): GATE 1's numbers.",
+        "properties": {
+          "baselines": {
+            "$ref": "#/components/schemas/RiskBaselines"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "gate_1": {
+            "$ref": "#/components/schemas/Gate1"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "leave_one_dataset_out": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RiskScores"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "leave_one_type_out": {
+            "$ref": "#/components/schemas/RiskScores"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "label",
+          "features",
+          "leave_one_type_out",
+          "baselines",
+          "gate_1"
+        ],
+        "title": "RiskEvaluation",
+        "type": "object"
+      },
       "RiskPrediction": {
         "description": "\u00a77.4.",
         "properties": {
@@ -785,6 +1032,74 @@
           "split"
         ],
         "title": "RiskPrediction",
+        "type": "object"
+      },
+      "RiskScores": {
+        "description": "How the risk model scores on held-out groups (``src.risk.classifier.evaluate``).",
+        "properties": {
+          "auprc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Estimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "auroc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Estimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conformal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConformalCoverage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ece": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ece"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "n_degraded": {
+            "title": "N Degraded",
+            "type": "integer"
+          },
+          "reliability": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReliabilityBin"
+            },
+            "title": "Reliability",
+            "type": "array"
+          }
+        },
+        "required": [
+          "n",
+          "n_degraded"
+        ],
+        "title": "RiskScores",
         "type": "object"
       },
       "SampleScore": {
@@ -968,7 +1283,7 @@
   "info": {
     "description": "Read-only access to ORIGIN-T's reports (HANDBOOK \u00a77.7). Errors are RFC 7807 problem+json. Responses carry a weak ETag; send it as If-None-Match for a 304.",
     "title": "ORIGIN-T API",
-    "version": "1.1.0"
+    "version": "1.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1653,6 +1968,106 @@
         "summary": "Risk",
         "tags": [
           "risk"
+        ]
+      }
+    },
+    "/v1/risk/evaluation": {
+      "get": {
+        "description": "The risk model's held-out AUROC/AUPRC/ECE, conformal coverage, baselines and GATE 1.",
+        "operationId": "risk_evaluation_v1_risk_evaluation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskEvaluation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not found, or not produced yet"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Invalid request parameters"
+          }
+        },
+        "summary": "Risk Evaluation",
+        "tags": [
+          "risk"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/stream": {
+      "get": {
+        "description": "The run's trainlog as it is written (X3 live monitor).",
+        "operationId": "trainlog_stream_v1_runs__run_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Server-Sent Events: `event: row` (`id` = step, `data` = one TrainlogRow as JSON) for every logged row, existing ones first, then live; `event: reset` if a new run restarts the log; `event: end` once the log has been quiet for a while (a finished run ends right after its replay). Send `Last-Event-ID` to resume after a step."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not found, or not produced yet"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Invalid request parameters"
+          }
+        },
+        "summary": "Trainlog Stream",
+        "tags": [
+          "runs"
         ]
       }
     },

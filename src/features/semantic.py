@@ -16,9 +16,14 @@ suite writes them as ``f_sem_<name>``):
 - ``mauve``: MAUVE (Pillutla et al., 2021) between the reference and the cell embeddings.
   1 = indistinguishable distributions.
 
-The clusters are fitted once per reference (fixed k and seed), so every cell of a seed is
-measured against the same clusters. Without ``reference_texts`` the reference columns are
-``None``; ``mauve`` is ``None`` too when ``mauve-text`` is not installed.
+The clusters are fitted once per reference, so every cell of a seed is measured against the
+same clusters. **Order never matters** (v2): k-means and MAUVE's own clustering depend on the
+order of their input, so the reference is sorted before fitting and both sets are sorted
+before MAUVE; the same texts give the same numbers wherever they come from (in v1 one cell's
+``tail_retention`` ranged 0.86-1.01 over shuffles of one reference). k-means also has many
+near-equal optima on ~1000 texts, so ``cluster_entropy`` and ``tail_retention`` average
+``N_FITS`` fits with different seeds rather than trusting one. Without ``reference_texts`` the
+reference columns are ``None``; ``mauve`` is ``None`` too when ``mauve-text`` is not installed.
 
 ``embed`` runs the model (sentence-transformers imported inside it); the rest is numpy and
 scikit-learn on embeddings, so tests stub ``embed``. ``cluster_assignments`` gives each
@@ -35,10 +40,11 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from typing import Any, Optional
 
-VERSION = 1  # bump when a column's definition changes (the suite recomputes)
+VERSION = 2  # bump when a column's definition changes (the suite recomputes). 2: order-free, N_FITS
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 K_NN = 10
 N_CLUSTERS = 20
+N_FITS = 10  # k-means fits (seeds SEED..SEED+9) averaged for cluster_entropy and tail_retention
 SEED = 0
 COLUMNS = ("knn_dist", "cluster_entropy", "tail_retention", "mauve")
 
@@ -80,15 +86,21 @@ def knn_distances(emb: Any, k: int = K_NN) -> Any:
 
 
 @lru_cache(maxsize=8)
-def _fit(ref_key: tuple[str, ...], device: str, batch_size: int) -> tuple[Any, Any]:
-    """k-means centroids of a reference set, and the indices of its tail clusters."""
+def _fit(ref_key: tuple[str, ...], device: str, batch_size: int) -> list[tuple[Any, Any]]:
+    """``N_FITS`` k-means fits of a reference set: each fit's centroids and tail-cluster indices.
+
+    ``ref_key`` is sorted (``_settings``), so the fits do not depend on the reference's order.
+    """
     import numpy as np
     from sklearn.cluster import KMeans
 
     ref = embed(list(ref_key), device=device, batch_size=batch_size)
-    km = KMeans(n_clusters=N_CLUSTERS, random_state=SEED, n_init=10).fit(ref)
-    share = np.bincount(km.labels_, minlength=N_CLUSTERS) / len(ref)
-    return km.cluster_centers_, np.flatnonzero(share < 1.0 / N_CLUSTERS)
+    fits = []
+    for seed in range(SEED, SEED + N_FITS):
+        km = KMeans(n_clusters=N_CLUSTERS, random_state=seed, n_init=10).fit(ref)
+        share = np.bincount(km.labels_, minlength=N_CLUSTERS) / len(ref)
+        fits.append((km.cluster_centers_, np.flatnonzero(share < 1.0 / N_CLUSTERS)))
+    return fits
 
 
 def _assign(emb: Any, centers: Any) -> Any:
@@ -116,7 +128,7 @@ def _settings(ctx: Optional[Mapping[str, Any]]) -> tuple[Optional[tuple[str, ...
     ctx = ctx or {}
     ref = ctx.get("reference_texts")
     kw = {"device": ctx.get("device", "cpu"), "batch_size": ctx.get("batch_size", 64)}
-    return (tuple(ref) if ref else None), kw
+    return (tuple(sorted(ref)) if ref else None), kw  # sorted: the same set gives the same clusters
 
 
 def semantic(texts: list[str], ctx: Optional[Mapping[str, Any]] = None) -> dict[str, Optional[float]]:
@@ -129,26 +141,31 @@ def semantic(texts: list[str], ctx: Optional[Mapping[str, Any]] = None) -> dict[
     out["knn_dist"] = float(knn_distances(emb).mean())
     if ref_key is None or len(ref_key) < N_CLUSTERS:
         return out
-    centers, tail = _fit(ref_key, **kw)
-    labels = _assign(emb, centers)
-    ref_labels = _assign(embed(list(ref_key), **kw), centers)
-    out["cluster_entropy"] = _entropy(labels)
-    if len(tail):
-        out["tail_retention"] = float(
-            (labels[:, None] == tail).any(1).mean() / (ref_labels[:, None] == tail).any(1).mean())
-    out["mauve"] = _mauve(embed(list(ref_key), **kw), emb)
+    ref_emb = embed(list(ref_key), **kw)
+    entropies, retentions = [], []
+    for centers, tail in _fit(ref_key, **kw):
+        labels = _assign(emb, centers)
+        entropies.append(_entropy(labels))
+        if len(tail):
+            ref_share = (_assign(ref_emb, centers)[:, None] == tail).any(1).mean()
+            retentions.append((labels[:, None] == tail).any(1).mean() / ref_share)
+    out["cluster_entropy"] = float(sum(entropies) / len(entropies))
+    if retentions:
+        out["tail_retention"] = float(sum(retentions) / len(retentions))
+    out["mauve"] = _mauve(ref_emb, embed(sorted(texts), **kw))  # both sides sorted: order-free
     return out
 
 
 def cluster_assignments(texts: list[str], ctx: Mapping[str, Any]) -> dict[str, Any]:
     """Each text's cluster among the reference's, and which clusters are the tail (for §9.4).
 
-    Returns ``{"labels": [int per text], "tail": [cluster ids], "n_clusters": N_CLUSTERS}``.
+    Returns ``{"labels": [int per text], "tail": [cluster ids], "n_clusters": N_CLUSTERS}``,
+    from the first of the ``N_FITS`` fits (seed ``SEED``): one fixed, order-free clustering.
     """
     ref_key, kw = _settings(ctx)
     if ref_key is None or len(ref_key) < N_CLUSTERS:
         raise ValueError(f"ctx['reference_texts'] needs at least {N_CLUSTERS} texts")
-    centers, tail = _fit(ref_key, **kw)
+    centers, tail = _fit(ref_key, **kw)[0]
     labels = _assign(embed(texts, **kw), centers) if texts else []
     return {"labels": [int(x) for x in labels], "tail": [int(x) for x in tail], "n_clusters": N_CLUSTERS}
 

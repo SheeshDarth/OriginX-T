@@ -13,8 +13,14 @@ without them.
 from __future__ import annotations
 
 import random
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any, Optional
+
+# on_step(step, model, tokenizer, last): step 0 is the untrained model, then after every
+# optimizer step; ``last`` is True once, after the final step. It must leave the model as
+# it found it (src.evaluation.live.TrainLogger does).
+OnStep = Callable[[int, Any, Any, bool], None]
 
 
 def train_lora(
@@ -29,8 +35,12 @@ def train_lora(
     lora_r: int = 8,
     seed: int = 0,
     device: str = "cpu",
+    on_step: Optional[OnStep] = None,
 ) -> Path:
-    """Train LoRA adapters on ``texts`` from ``base_model``. Returns ``out_dir``."""
+    """Train LoRA adapters on ``texts`` from ``base_model``. Returns ``out_dir``.
+
+    ``on_step`` (optional) watches training, e.g. to log signals every N steps (X3).
+    """
     import torch
     from peft import LoraConfig, get_peft_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -48,6 +58,10 @@ def train_lora(
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=lr)
 
     rng = random.Random(seed)
+    step = 0
+    total = epochs * -(-len(texts) // batch_size)
+    if on_step is not None:
+        on_step(0, model, tok, total == 0)
     for _ in range(epochs):
         order = list(texts)
         rng.shuffle(order)
@@ -63,6 +77,9 @@ def train_lora(
             model(**batch, labels=labels).loss.backward()
             opt.step()
             opt.zero_grad()
+            step += 1
+            if on_step is not None:
+                on_step(step, model, tok, step == total)
 
     out_dir = Path(out_dir)
     model.merge_and_unload().save_pretrained(out_dir)

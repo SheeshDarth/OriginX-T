@@ -101,3 +101,28 @@ def test_real_embeddings_are_unit_length_and_meaningful():
     assert emb.shape == (3, 384)
     assert np.linalg.norm(emb, axis=1) == pytest.approx([1.0, 1.0, 1.0], abs=1e-4)
     assert emb[0] @ emb[1] > emb[0] @ emb[2] + 0.3
+
+
+def test_the_order_of_the_texts_never_changes_the_numbers(monkeypatch):
+    # random, overlapping embeddings: k-means is order-sensitive here, so only sorting saves it
+    sem._fit.cache_clear()
+    vecs = {}
+
+    def fake(texts, **kw):
+        for t in texts:
+            if t not in vecs:
+                v = np.random.default_rng(int(t[1:])).normal(size=16)
+                vecs[t] = (v / np.linalg.norm(v)).astype(np.float32)
+        return np.stack([vecs[t] for t in texts])
+
+    monkeypatch.setattr(sem, "embed", fake)
+    monkeypatch.setattr(sem, "_mauve", lambda ref, emb: float(ref[:, 0] @ np.arange(len(ref))
+                                                               + emb[:, 0] @ np.arange(len(emb))))
+    ref = [f"t{i}" for i in range(300)]
+    cell = ref[:150] + [f"t{i}" for i in range(1000, 1150)]
+    first = sem.semantic(cell, {"reference_texts": ref})
+    for k in range(3):
+        rng = __import__("random").Random(k)
+        sem._fit.cache_clear()
+        again = sem.semantic(rng.sample(cell, len(cell)), {"reference_texts": rng.sample(ref, len(ref))})
+        assert again == first  # exactly, every column (the stub MAUVE is order-sensitive too)
