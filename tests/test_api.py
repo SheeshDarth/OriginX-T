@@ -75,9 +75,13 @@ def test_committed_openapi_json_matches_the_code():
         "(and remember v1 is frozen: additive changes only)")
 
 
+# the audit job routes have their own tests below
+AUDIT_PATHS = {"/v1/audits", "/v1/audits/{audit_id}"}
+
+
 def test_every_route_in_the_spec_returns_schema_valid_data(client):
     spec = json.loads(SPEC.read_text(encoding="utf-8"))
-    assert set(spec["paths"]) == set(URLS)
+    assert set(spec["paths"]) == set(URLS) | AUDIT_PATHS
     route_models = {r.path: r.response_model for r in client.app.routes if hasattr(r, "response_model")}
     for template, url in URLS.items():
         r = client.get(url)
@@ -146,3 +150,143 @@ def test_cors_lets_the_vite_dev_server_read_responses_and_etags(client):
     assert "etag" in r.headers["access-control-expose-headers"].lower()
     assert "access-control-allow-origin" not in client.get(
         "/v1/gates", headers={"Origin": "http://evil.example"}).headers
+
+
+# ---------------------------------------------------------------- audit jobs (#34)
+
+DEPLOYED = {"model": "logreg@1", "cols": ["f_lex_entropy"], "mean": [3.0], "std": [1.0], "w": [-2.0],
+            "b": 0.0, "alpha": 0.1, "q": 0.5}
+JSONL = b'{"id": "a", "text": "the cat sat on the mat"}\n\n{"prompt": "q", "response": "an answer"}\n'
+
+
+def _report(n):
+    return {"schema": "audit/1", "n_samples": n, "model": "logreg@1", "p_degrade": 0.7,
+            "conformal_set": [1], "alpha": 0.1, "features": {"f_lex_entropy": 2.5, "f_sem_mauve": None},
+            "missing_features": [], "contributions": [{"feature": "f_lex_entropy", "value": 2.5,
+                                                       "contribution": 1.0}],
+            "n_flagged": 0, "flagged": []}
+
+
+@pytest.fixture
+def audits(root):
+    """A client whose audits run a stub; ``calls`` records what each audit was given."""
+    (root / "reports/risk").mkdir(parents=True, exist_ok=True)
+    (root / "reports/risk/model.json").write_text(json.dumps(DEPLOYED), encoding="utf-8")
+    calls = []
+
+    def runner(samples, deployed, bench):
+        calls.append((samples, deployed, bench))
+        if samples[0].response == "boom":
+            raise RuntimeError("the model fell over")
+        return _report(len(samples)), [{"sample_id": s.sample_id, "method": "risk_reflm", "score": -3.0}
+                                       for s in samples]
+
+    return TestClient(api.create_app(root, runner=runner)), calls
+
+
+def _finish(client, location, seconds=10.0):
+    import time
+
+    deadline = time.monotonic() + seconds
+    while True:
+        job = client.get(location).json()
+        if job["status"] in ("done", "failed") or time.monotonic() > deadline:
+            return job
+        time.sleep(0.02)
+
+
+def test_an_upload_becomes_a_job_that_finishes_with_a_typed_report(audits):
+    client, calls = audits
+    r = client.post("/v1/audits?name=my data.jsonl", content=JSONL,
+                    headers={"Content-Type": "application/x-ndjson"})
+    assert r.status_code == 202, r.text
+    job = r.json()
+    assert job["status"] == "queued" and job["n_samples"] == 2 and job["report"] is None
+    assert r.headers["location"] == f"/v1/audits/{job['id']}"
+    done = _finish(client, r.headers["location"])
+    assert done["status"] == "done" and done["finished_at"] and done["error"] is None
+    report = api.AuditReport.model_validate(done["report"])
+    assert done["report"]["schema"] == "audit/1" and report.p_degrade == 0.7
+    assert [s["sample_id"] for s in done["scores"]] == ["a", "my data-0000001"]
+    assert done["scores"][0]["higher_is"] == "worse"
+    samples, deployed, bench = calls[0]
+    assert [s.response for s in samples] == ["the cat sat on the mat", "an answer"]  # same aliases as files
+    assert deployed == DEPLOYED and bench == []
+
+
+def test_a_failing_audit_is_reported_not_raised(audits):
+    client, _ = audits
+    r = client.post("/v1/audits", content=b'{"text": "boom"}\n')
+    done = _finish(client, r.headers["location"])
+    assert done["status"] == "failed" and "the model fell over" in done["error"] and done["report"] is None
+
+
+@pytest.mark.parametrize("body, query, status, detail", [
+    (b'{"text": "ok"}\nnot json\n', "", 422, "line 2"),
+    (b"[1, 2]\n", "", 422, "line 1"),
+    (b'{"text": ""}\n', "", 422, "line 1"),            # a record without text fails Sample validation
+    (b"\n\n", "", 422, "no records"),
+    (b"\xff\xfe\x00", "", 422, "UTF-8"),
+    (JSONL, "?benchmark=imagenet", 422, "benchmark"),
+    (JSONL, "?name=../../etc", 422, "name"),
+    (JSONL, "?benchmark=tinystories", 503, "benchmark data"),  # no grid data in this root
+])
+def test_bad_uploads_are_problem_json_and_start_nothing(audits, body, query, status, detail):
+    client, calls = audits
+    r = client.post("/v1/audits" + query, content=body)
+    assert r.status_code == status, r.text
+    assert r.headers["content-type"] == "application/problem+json"
+    assert detail in r.json()["detail"]
+    assert calls == []
+
+
+def test_size_limits(audits, monkeypatch):
+    client, calls = audits
+    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 10)
+    assert client.post("/v1/audits", content=JSONL).status_code == 413
+    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 2**20)
+    monkeypatch.setattr(api, "MAX_SAMPLES", 1)
+    r = client.post("/v1/audits", content=JSONL)
+    assert r.status_code == 413 and "more than 1 records" in r.json()["detail"] and calls == []
+
+
+def test_no_deployed_model_is_a_503_that_says_what_to_run(root):
+    r = TestClient(api.create_app(root, runner=lambda *a: None)).post("/v1/audits", content=JSONL)
+    assert r.status_code == 503 and "src.risk.classifier" in r.json()["detail"]
+
+
+def test_unknown_and_malformed_audit_ids(audits):
+    client, _ = audits
+    assert client.get("/v1/audits/" + "0" * 32).status_code == 404
+    assert client.get("/v1/audits/not-an-id").status_code == 422
+
+
+def test_cors_allows_the_ui_to_post_and_read_the_location(audits):
+    client, _ = audits
+    pre = client.options("/v1/audits", headers={"Origin": "http://localhost:5173",
+                                                "Access-Control-Request-Method": "POST",
+                                                "Access-Control-Request-Headers": "content-type"})
+    assert pre.status_code == 200 and "POST" in pre.headers["access-control-allow-methods"]
+    r = client.post("/v1/audits", content=JSONL, headers={"Origin": "http://localhost:5173"})
+    assert "location" in r.headers["access-control-expose-headers"].lower()
+
+
+def test_the_default_runner_wires_the_audit_and_both_scores(monkeypatch):
+    from src.features import model as reflm
+    from src.features import semantic
+    from src.features.suite import FAMILIES
+    from src.ingestion.schema import Sample
+    from src.risk import audit as audit_mod
+
+    monkeypatch.setattr(audit_mod, "FAMILIES", {k: FAMILIES[k] for k in ("lex", "leak")})  # no models
+    monkeypatch.setattr(reflm, "per_text", lambda texts, ctx: [{"loss": 2.0}, None])
+    monkeypatch.setattr(semantic, "per_text", lambda texts, ctx: [0.25, 0.5])
+    samples = [Sample(sample_id="x", response="the quick brown fox jumps"),
+               Sample(sample_id="y", response="the quick brown fox jumps over the lazy dog")]
+    report, scores = api.run_audit(samples, DEPLOYED, ["the quick brown fox jumps over the lazy dog"])
+    assert api.AuditReport.model_validate(report).n_samples == 2
+    assert report["n_flagged"] == 1 and report["flagged"][0]["sample_id"] == "y"  # the benchmark copy
+    assert scores == [{"sample_id": "x", "method": "risk_reflm", "score": -2.0},
+                      {"sample_id": "y", "method": "risk_reflm", "score": None},
+                      {"sample_id": "x", "method": "risk_knn", "score": -0.25},
+                      {"sample_id": "y", "method": "risk_knn", "score": -0.5}]

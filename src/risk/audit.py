@@ -27,7 +27,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 from ..features import leak as leak_family
 from ..features.lex import lex
-from ..features.suite import FAMILIES, features_for
+from ..features.suite import FAMILIES, _device, features_for
 from . import conformal
 from .classifier import LogReg
 
@@ -58,7 +58,7 @@ def audit(texts: Sequence[str], ids: Sequence[str], deployed: Mapping[str, Any],
     feats: dict[str, Any] = {}
     for name, family in FAMILIES.items():
         try:
-            feats.update(features_for(list(texts), {name: family}, {"benchmark": list(bench)}))
+            feats.update(features_for(list(texts), {name: family}, {"benchmark": list(bench), "device": _device("auto")}))
         except ImportError:  # a family whose libraries (torch, ...) are not installed: its columns go missing
             pass
     p = model.predict([feats])[0]
@@ -97,16 +97,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     samples = load_dataset(args.dataset)
     bench = [s.response for s in load_dataset(args.benchmark)] if args.benchmark else []
     if args.grid:
-        import random
-
-        import yaml
-
-        from ..finetune.collapse import _pick
-
-        d = yaml.safe_load(Path(args.grid).read_text(encoding="utf-8"))["data"]
-        # the same draw as grid._train_all, so "leak" means a leak of what the grid measured
-        bench = [s.response for s in _pick(load_dataset(d["benchmark"]), d["n_benchmark"], d["min_words"],
-                                           d["max_words"], random.Random("benchmark"))]
+        bench = grid_benchmark(args.grid)
     deployed = json.loads(Path(args.model).read_text(encoding="utf-8"))
     report = audit([training_text(s) for s in samples], [s.sample_id for s in samples], deployed, bench)
     text = json.dumps(report, indent=2) + "\n"
@@ -116,6 +107,21 @@ def main(argv: Optional[list[str]] = None) -> None:
               f"{report['n_flagged']} of {report['n_samples']} samples flagged -> {args.out}")
     else:
         print(text, end="")
+
+
+def grid_benchmark(grid_config: str | Path) -> list[str]:
+    """The benchmark item texts a grid leaked and scored (the same draw as ``grid._train_all``),
+    so "leak" means a leak of what the grid measured."""
+    import random
+
+    import yaml
+
+    from ..finetune.collapse import _pick
+    from ..ingestion.loaders import load_dataset
+
+    d = yaml.safe_load(Path(grid_config).read_text(encoding="utf-8"))["data"]
+    return [s.response for s in _pick(load_dataset(d["benchmark"]), d["n_benchmark"], d["min_words"],
+                                      d["max_words"], random.Random("benchmark"))]
 
 
 if __name__ == "__main__":

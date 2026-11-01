@@ -1,6 +1,199 @@
 {
   "components": {
     "schemas": {
+      "AuditJob": {
+        "properties": {
+          "benchmark": {
+            "anyOf": [
+              {
+                "enum": [
+                  "wikitext2",
+                  "tinystories"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "n_samples": {
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scores": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SampleScore"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scores"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "n_samples",
+          "created_at"
+        ],
+        "title": "AuditJob",
+        "type": "object"
+      },
+      "AuditReport": {
+        "description": "The ``audit/1`` report of ``src.risk.audit`` (what the Audit screen renders).",
+        "properties": {
+          "alpha": {
+            "title": "Alpha",
+            "type": "number"
+          },
+          "conformal_set": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Conformal Set",
+            "type": "array"
+          },
+          "contributions": {
+            "items": {
+              "$ref": "#/components/schemas/Contribution"
+            },
+            "title": "Contributions",
+            "type": "array"
+          },
+          "features": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "flagged": {
+            "items": {
+              "$ref": "#/components/schemas/FlaggedSample"
+            },
+            "title": "Flagged",
+            "type": "array"
+          },
+          "missing_features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Features",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "n_flagged": {
+            "title": "N Flagged",
+            "type": "integer"
+          },
+          "n_samples": {
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "p_degrade": {
+            "title": "P Degrade",
+            "type": "number"
+          },
+          "schema": {
+            "const": "audit/1",
+            "title": "Schema",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "n_samples",
+          "model",
+          "p_degrade",
+          "conformal_set",
+          "alpha",
+          "features",
+          "missing_features",
+          "contributions",
+          "n_flagged",
+          "flagged"
+        ],
+        "title": "AuditReport",
+        "type": "object"
+      },
       "BenchSample": {
         "properties": {
           "benchmark_near_score": {
@@ -47,6 +240,36 @@
           "split"
         ],
         "title": "BenchSample",
+        "type": "object"
+      },
+      "Contribution": {
+        "properties": {
+          "contribution": {
+            "title": "Contribution",
+            "type": "number"
+          },
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "feature",
+          "value",
+          "contribution"
+        ],
+        "title": "Contribution",
         "type": "object"
       },
       "Curve": {
@@ -164,6 +387,61 @@
           "features"
         ],
         "title": "FeatureRow",
+        "type": "object"
+      },
+      "FlaggedSample": {
+        "properties": {
+          "benchmark_similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Similarity"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "repeat_3gram": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeat 3Gram"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "sample_id",
+          "text",
+          "benchmark_similarity",
+          "repeat_3gram",
+          "reasons"
+        ],
+        "title": "FlaggedSample",
         "type": "object"
       },
       "Gate": {
@@ -509,6 +787,47 @@
         "title": "RiskPrediction",
         "type": "object"
       },
+      "SampleScore": {
+        "description": "A per-sample risk score (\u00a77.3, without ``true_source``, which an upload does not have).",
+        "properties": {
+          "higher_is": {
+            "const": "worse",
+            "default": "worse",
+            "title": "Higher Is",
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "risk_reflm",
+              "risk_knn"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "sample_id",
+          "method",
+          "score"
+        ],
+        "title": "SampleScore",
+        "type": "object"
+      },
       "TrainlogRow": {
         "description": "\u00a77.6, with the ``sig_`` columns gathered into ``signals`` (prefix dropped).",
         "properties": {
@@ -649,10 +968,178 @@
   "info": {
     "description": "Read-only access to ORIGIN-T's reports (HANDBOOK \u00a77.7). Errors are RFC 7807 problem+json. Responses carry a weak ETag; send it as If-None-Match for a 304.",
     "title": "ORIGIN-T API",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/audits": {
+      "post": {
+        "description": "Start an audit of the uploaded dataset. Poll ``GET /v1/audits/{id}`` for the report.\n\n``benchmark`` also checks every sample for near-copies of that grid's benchmark items.",
+        "operationId": "create_audit_v1_audits_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "wikitext2",
+                    "tinystories"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "default": "upload",
+              "maxLength": 120,
+              "pattern": "^[\\w .-]+$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-ndjson": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The dataset: one JSON object per line (prompt/response, text, ... as the loaders accept), UTF-8.",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not found, or not produced yet"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Upload too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "No deployed risk model, or the benchmark data is not on this server"
+          }
+        },
+        "summary": "Create Audit",
+        "tags": [
+          "audits"
+        ]
+      }
+    },
+    "/v1/audits/{audit_id}": {
+      "get": {
+        "description": "An audit's status; ``report`` and ``scores`` once it is ``done``.",
+        "operationId": "get_audit_v1_audits__audit_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audit_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Audit Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not found, or not produced yet"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Invalid request parameters"
+          }
+        },
+        "summary": "Get Audit",
+        "tags": [
+          "audits"
+        ]
+      }
+    },
     "/v1/bench/samples": {
       "get": {
         "operationId": "bench_samples_v1_bench_samples_get",
