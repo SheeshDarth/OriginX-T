@@ -108,6 +108,10 @@ test("the curves plot labels its axes and draws one dot per selected run", () =>
   );
   expect(plot.textContent).toContain("Hidden-holdout perplexity");
   expect(plot.textContent).toContain("Contamination ratio");
+  const ticks = [
+    ...plot.querySelectorAll("[aria-label='x-axis tick label'] text"),
+  ].map((t) => t.textContent);
+  expect(ticks).toEqual(["0", "0.25", "0.5", "0.75", "1"]); // the real ratios, not rounded to "0.3"
   expect(plot.querySelectorAll("circle").length).toBe(2);
   const none = curvesPlot(
     [],

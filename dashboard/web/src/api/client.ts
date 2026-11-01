@@ -7,6 +7,7 @@ export type Curve = S["Curve"];
 export type GridResult = S["GridResult"];
 export type WhiteboxCell = S["WhiteboxCell"];
 export type FeatureRow = S["FeatureRow"];
+export type RiskEvaluation = S["RiskEvaluation"];
 export type Dataset = "wikitext2" | "tinystories";
 
 export const api = createClient<paths>({
