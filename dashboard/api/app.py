@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import uuid
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional
 
@@ -12,17 +17,24 @@ from fastapi import Path as PathParam
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.finetune.grid import CONTAMINATION_TYPES
+from src.ingestion.loaders import normalize_record
+from src.ingestion.schema import Sample
 
 REPO = Path(__file__).resolve().parents[2]
-API_VERSION = "1.0.0"
+API_VERSION = "1.1.0"  # 1.1: POST /v1/audits, GET /v1/audits/{id}
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
 GRID_DIRS: dict[str, str] = {"wikitext2": "reports/grid", "tinystories": "reports/grid_tinystories"}
+GRID_CONFIGS: dict[str, str] = {"wikitext2": "configs/grid.yaml", "tinystories": "configs/grid_tinystories.yaml"}
+DEPLOYED_MODEL = "reports/risk/model.json"  # written by python -m src.risk.classifier
+MAX_UPLOAD_BYTES = 20 * 2**20
+MAX_SAMPLES = 20_000
+AuditId = Annotated[str, PathParam(pattern=r"^[0-9a-f]{32}$")]
 # a file name, never a path: no separators, no leading dot
 RunId = Annotated[str, PathParam(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
 
@@ -167,6 +179,59 @@ class BenchSample(Model):
     split: str
 
 
+class Contribution(Model):
+    feature: str
+    value: Optional[float]
+    contribution: float
+
+
+class FlaggedSample(Model):
+    index: int
+    sample_id: str
+    text: str
+    benchmark_similarity: Optional[float]
+    repeat_3gram: Optional[float]
+    reasons: list[str]
+
+
+class AuditReport(Model):
+    """The ``audit/1`` report of ``src.risk.audit`` (what the Audit screen renders)."""
+
+    schema_: Literal["audit/1"] = Field(alias="schema")
+    n_samples: int
+    model: str
+    p_degrade: float
+    conformal_set: list[int]
+    alpha: float
+    features: dict[str, Optional[float]]
+    missing_features: list[str]
+    contributions: list[Contribution]
+    n_flagged: int
+    flagged: list[FlaggedSample]
+
+
+class SampleScore(Model):
+    """A per-sample risk score (§7.3, without ``true_source``, which an upload does not have)."""
+
+    sample_id: str
+    method: Literal["risk_reflm", "risk_knn"]
+    score: Optional[float]
+    higher_is: Literal["worse"] = "worse"
+
+
+class AuditJob(Model):
+    id: str
+    status: Literal["queued", "running", "done", "failed"]
+    name: Optional[str] = None
+    n_samples: int
+    benchmark: Optional[Dataset] = None
+    created_at: str
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
+    report: Optional[AuditReport] = None   # once done
+    scores: Optional[list[SampleScore]] = None
+
+
 # ---------------------------------------------------------------- reading reports
 
 def _problem(status: int, title: str, detail: Optional[str], instance: str) -> JSONResponse:
@@ -266,10 +331,71 @@ def _with_prefix(row: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {k[len(prefix):]: v for k, v in row.items() if k.startswith(prefix)}
 
 
+# ---------------------------------------------------------------- audit jobs
+
+# (samples, deployed model, benchmark texts) -> (audit/1 report, per-sample score rows)
+Runner = Callable[[list[Sample], Mapping[str, Any], list[str]], tuple[dict[str, Any], list[dict[str, Any]]]]
+
+
+def run_audit(samples: list[Sample], deployed: Mapping[str, Any],
+              bench: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The audit/1 report (``src.risk.audit``) and the two per-sample risk scores (§7.3)."""
+    from src.features import model as reflm
+    from src.features import semantic
+    from src.features.suite import _device
+    from src.finetune.collapse import training_text
+    from src.risk.audit import audit
+
+    texts, ids = [training_text(s) for s in samples], [s.sample_id for s in samples]
+    report = audit(texts, ids, deployed, bench)
+    ctx = {"device": _device("auto")}
+    scores: list[dict[str, Any]] = []
+    for method, per_text, value in (
+        ("risk_reflm", reflm.per_text, lambda v: None if v is None else -v["loss"]),
+        ("risk_knn", semantic.per_text, lambda v: None if v is None else -v),
+    ):
+        try:
+            values = [value(v) for v in per_text(texts, ctx)]
+        except ImportError:  # the family's libraries are not installed on this server
+            values = [None] * len(texts)
+        scores += [{"sample_id": i, "method": method, "score": v} for i, v in zip(ids, values)]
+    return report, scores
+
+
+def parse_upload(body: bytes, name: str) -> list[Sample]:
+    """JSONL records -> validated Samples, the way ``load_dataset`` reads a .jsonl file."""
+    try:
+        text = body.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(422, "the upload is not UTF-8 text") from None
+    samples: list[Sample] = []
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                raise ValueError("expected a JSON object")
+            samples.append(normalize_record(record, len(samples), stem=name))
+        except (ValueError, TypeError) as e:
+            raise HTTPException(422, f"line {n}: {str(e)[:200]}") from None
+        if len(samples) > MAX_SAMPLES:
+            raise HTTPException(413, f"more than {MAX_SAMPLES} records")
+    if not samples:
+        raise HTTPException(422, "no records: send one JSON object per line")
+    return samples
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 # ---------------------------------------------------------------- the app
 
-def create_app(root: Path = REPO) -> FastAPI:
+def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI:
+    """``runner`` does an audit's work (default ``run_audit``); tests pass a stub."""
     reports = Reports(root)
+    run = runner or run_audit
     # Descriptions are explicit: the default is Python's status phrase, which 3.13 changed for
     # 422, and the committed spec must not depend on the Python version.
     problem = {"model": Problem, "content": {"application/problem+json": {}}}
@@ -282,12 +408,14 @@ def create_app(root: Path = REPO) -> FastAPI:
     )
     app.add_middleware(
         CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_methods=["GET"], allow_headers=["If-None-Match"], expose_headers=["ETag"],
+        allow_methods=["GET", "POST"], allow_headers=["If-None-Match", "Content-Type"],
+        expose_headers=["ETag", "Location"],
     )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        titles = {404: "Not found", 405: "Method not allowed"}
+        titles = {404: "Not found", 405: "Method not allowed", 413: "Upload too large",
+                  422: "Invalid request", 503: "Not available on this server"}
         return _problem(exc.status_code, titles.get(exc.status_code, "Error"), str(exc.detail),
                         request.url.path)
 
@@ -357,6 +485,81 @@ def create_app(root: Path = REPO) -> FastAPI:
             return cached
         # belt and braces: a bench file must never hold holdout text, but never serve it either
         return [s for s in reports.jsonl(rel) if s.get("split") != "hidden_holdout"][:limit]
+
+    # ponytail: jobs live in memory and are lost on restart; persist them (reports/audits/)
+    # if audits must outlive the server. One worker: audits share one GPU and its loaded models.
+    jobs: dict[str, dict[str, Any]] = {}
+    lock = threading.Lock()
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="audit")
+
+    def update(job_id: str, **fields: Any) -> None:
+        with lock:
+            jobs[job_id] = {**jobs[job_id], **fields}
+
+    def work(job_id: str, samples: list[Sample], deployed: Mapping[str, Any], bench: list[str]) -> None:
+        update(job_id, status="running")
+        try:
+            report, scores = run(samples, deployed, bench)
+            update(job_id, status="done", report=report, scores=scores, finished_at=_now())
+        except Exception as e:  # the client sees it as the job's error
+            update(job_id, status="failed", error=f"{type(e).__name__}: {e}"[:500], finished_at=_now())
+
+    upload = {"requestBody": {"required": True, "description": "The dataset: one JSON object per line "
+                              "(prompt/response, text, ... as the loaders accept), UTF-8.",
+                              "content": {"application/x-ndjson": {"schema": {"type": "string",
+                                                                              "format": "binary"}}}}}
+
+    @app.post("/v1/audits", status_code=202, response_model=AuditJob, tags=["audits"],
+              openapi_extra=upload, responses={413: {**problem, "description": "Upload too large"},
+                                               503: {**problem, "description": "No deployed risk model, "
+                                                     "or the benchmark data is not on this server"}})
+    async def create_audit(
+        request: Request, response: Response, benchmark: Optional[Dataset] = None,
+        name: Annotated[str, Query(max_length=120, pattern=r"^[\w .-]+$")] = "upload",
+    ) -> Any:
+        """Start an audit of the uploaded dataset. Poll ``GET /v1/audits/{id}`` for the report.
+
+        ``benchmark`` also checks every sample for near-copies of that grid's benchmark items.
+        """
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"the upload is over {MAX_UPLOAD_BYTES // 2**20} MB")
+        body = await request.body()
+        if len(body) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"the upload is over {MAX_UPLOAD_BYTES // 2**20} MB")
+        samples = parse_upload(body, Path(name).stem)  # ids as load_dataset would give the file
+        model_file = reports.path(DEPLOYED_MODEL)
+        if not model_file.is_file():
+            raise HTTPException(503, f"no deployed risk model ({DEPLOYED_MODEL}); "
+                                     "run python -m src.risk.classifier")
+        deployed = json.loads(model_file.read_text(encoding="utf-8"))
+        bench: list[str] = []
+        if benchmark:
+            from src.risk.audit import grid_benchmark
+
+            try:
+                bench = grid_benchmark(reports.path(GRID_CONFIGS[benchmark]))
+            except (OSError, KeyError) as e:
+                raise HTTPException(503, f"the {benchmark} benchmark data is not on this server "
+                                         f"({type(e).__name__})") from None
+        job_id = uuid.uuid4().hex
+        job = {"id": job_id, "status": "queued", "name": name, "n_samples": len(samples),
+               "benchmark": benchmark, "created_at": _now()}
+        with lock:
+            jobs[job_id] = job
+        worker.submit(work, job_id, samples, deployed, bench)
+        response.headers["Location"] = f"/v1/audits/{job_id}"
+        return job
+
+    @app.get("/v1/audits/{audit_id}", response_model=AuditJob, tags=["audits"])
+    def get_audit(audit_id: AuditId, response: Response) -> Any:
+        """An audit's status; ``report`` and ``scores`` once it is ``done``."""
+        with lock:
+            job = jobs.get(audit_id)
+        if job is None:
+            raise HTTPException(404, f"no audit {audit_id} (jobs are kept until the server restarts)")
+        response.headers["Cache-Control"] = "no-store"
+        return job
 
     return app
 

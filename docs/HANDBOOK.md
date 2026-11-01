@@ -586,9 +586,14 @@ alarm and the canary.
       `concurrent.futures` is enough; no Celery or Redis unless proven necessary.
 - [x] `python -m dashboard.api` serves on `:8000`. CORS for `localhost:5173`. Commit
       `openapi.json`. Contract test: every route in the spec returns schema-valid fixtures (#30).
-- [ ] `POST /v1/audits`: validates the upload against `Sample`, runs Track A's feature suite +
+- [x] `POST /v1/audits`: validates the upload against `Sample`, runs Track A's feature suite +
       risk model + per-sample scores, and returns the §7.4/§7.3 shapes. Size limit and a clear
-      problem+json error on bad input.
+      problem+json error on bad input. Done (#34): the body is the raw JSONL
+      (`application/x-ndjson`, ≤ 20 MB, ≤ 20,000 records, parsed like `load_dataset`);
+      `?benchmark=wikitext2` adds the grid's leak check; `202` + `Location`; one background
+      worker runs `src.risk.audit` + `risk_reflm`/`risk_knn`; `GET /v1/audits/{id}` returns
+      `status` and then the typed `audit/1` report (`AuditReport` in openapi.json). 503 until
+      `reports/risk/model.json` exists. Jobs are in memory (lost on restart).
 
 ### 10.4 X3: live collapse alarm, by CP2 (cut-off 2027-01-15)
 - [ ] `src/evaluation/live.py`: a HF `TrainerCallback` **and** a hook for our `train_lora`
