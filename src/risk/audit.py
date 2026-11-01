@@ -55,7 +55,12 @@ def flag_samples(texts: Sequence[str], ids: Sequence[str], bench: Sequence[str])
 def audit(texts: Sequence[str], ids: Sequence[str], deployed: Mapping[str, Any],
           bench: Sequence[str] = ()) -> dict[str, Any]:
     model = LogReg.from_dict(deployed)
-    feats = features_for(list(texts), FAMILIES, {"benchmark": list(bench)})
+    feats: dict[str, Any] = {}
+    for name, family in FAMILIES.items():
+        try:
+            feats.update(features_for(list(texts), {name: family}, {"benchmark": list(bench)}))
+        except ImportError:  # a family whose libraries (torch, ...) are not installed: its columns go missing
+            pass
     p = model.predict([feats])[0]
     q = math.inf if deployed["q"] is None else deployed["q"]
     contrib = model.contributions(feats)

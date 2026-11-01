@@ -3,7 +3,7 @@
 import json
 
 from src.finetune.grid import make_cells
-from src.features.suite import run_suite
+from src.features.suite import FAMILIES, run_suite
 
 
 def _stub(calls):
@@ -45,9 +45,34 @@ def test_resume_skips_done_cells_and_a_new_version_recomputes(tmp_path):
     assert calls == ["synthetic_r0_s0", "synthetic_r1_s0"]  # stub@1 rows are stale under stub@2
 
 
+def test_families_get_the_cell_and_its_seeds_ratio_0_texts_as_reference(tmp_path):
+    seen = {}
+
+    def spy(texts, ctx):
+        seen[ctx["cell"]] = ctx
+        return {}
+
+    def texts_for(cell):
+        return [f"s{cell.seed}-human"] * 4 + [cell.type] * int(cell.ratio * 4)
+
+    out = tmp_path / "f.jsonl"
+    cells = make_cells(["synthetic", "recursive"], [0.0, 1.0], [0, 1])
+    run_suite("wikitext2", cells, texts_for, out, families={"spy": (spy, 1)}, ctx={"device": "cpu"})
+    c = seen["recursive_r1_s1"]
+    assert (c["type"], c["ratio"], c["seed"], c["dataset"], c["device"]) == ("recursive", 1.0, 1, "wikitext2", "cpu")
+    assert c["reference_texts"] == ["s1-human"] * 4
+    assert seen["synthetic_r1_s0"]["reference_texts"] == ["s0-human"] * 4
+    # resumed after the ratio-0 cells were done: the reference is rebuilt, not missing
+    seen.clear()
+    out.write_text("".join(line + "\n" for line in out.read_text().splitlines()[:2]), encoding="utf-8")
+    run_suite("wikitext2", cells, texts_for, out, families={"spy": (spy, 1)})
+    assert seen["synthetic_r1_s0"]["reference_texts"] == ["s0-human"] * 4
+
+
 def test_real_families_plug_in(tmp_path):
     rows = run_suite("wikitext2", make_cells(["benchmark_near"], [1.0], [0]),
                      lambda c: ["the quick brown fox"], tmp_path / "f.jsonl",
+                     families={k: FAMILIES[k] for k in ("lex", "leak")},
                      ctx={"benchmark": ["The quick brown fox"]})
     assert rows[0]["feature_version"] == "lex@1+leak@1"
     assert rows[0]["f_leak_frac_above_0_9"] == 1.0 and rows[0]["f_lex_ttr"] == 1.0

@@ -1,0 +1,4 @@
+# Data files are compared byte for byte (fixtures, results): keep LF on every OS,
+# whatever core.autocrlf says.
+*.jsonl text eol=lf
+*.json text eol=lf

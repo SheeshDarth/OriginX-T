@@ -1,8 +1,7 @@
 # Exact versions from the environment that ran the WikiText grid (2026-10, Python 3.13.1,
 # Windows, CUDA 12.4). Install: see README "Getting started".
 # Pins requirements.txt and its dependencies. The gated packages not used yet
-# (bitsandbytes, faiss-cpu, lifelines, mapie, mauve-text, pycox, sentence-transformers,
-# shap) are not pinned. Regenerate when a dependency is added.
+# (bitsandbytes, lifelines, mapie, pycox, shap) are not pinned. Regenerate when a dependency is added.
 --extra-index-url https://download.pytorch.org/whl/cu124
 accelerate==1.15.0
 aiohappyeyeballs==2.6.1
@@ -27,6 +26,7 @@ databricks-sdk==0.149.0
 datasets==4.8.5
 dill==0.4.1
 docker==7.2.0
+faiss-cpu==1.15.1
 fastapi==0.115.5
 filelock==3.24.3
 flask-cors==6.0.2
@@ -58,6 +58,7 @@ Mako==1.4.3
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
 matplotlib==3.10.8
+mauve-text==0.4.0
 mdurl==0.1.2
 mlflow-skinny==3.17.0
 mlflow-tracing==3.17.0
@@ -101,6 +102,7 @@ safetensors==0.7.0
 scikit-learn==1.6.1
 scipy==1.15.2
 seaborn==0.13.2
+sentence-transformers==6.2.0
 setuptools==80.10.2
 shellingham==1.5.4
 six==1.17.0

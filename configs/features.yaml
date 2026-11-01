@@ -5,7 +5,8 @@
 # Needs the grid's data files and cached pools (data/processed/..., HANDBOOK §12.3):
 # run it on the machine that ran the grid, or copy them over. Resumable.
 
-families: [lex, leak]        # model, sem: Track C (§10.7), added here when they land
+families: [lex, leak, model, sem]   # model, sem: Track C (§10.7); they need a GPU to be quick
+device: auto                        # model and sem: auto = cuda if available, else cpu (slow)
 output_dir: reports/features # <dataset>.jsonl, committed
 
 datasets:
