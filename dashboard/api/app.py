@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi import Path as PathParam
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -25,7 +27,7 @@ from src.ingestion.loaders import normalize_record
 from src.ingestion.schema import Sample
 
 REPO = Path(__file__).resolve().parents[2]
-API_VERSION = "1.1.0"  # 1.1: POST /v1/audits, GET /v1/audits/{id}
+API_VERSION = "1.2.0"  # 1.1: POST /v1/audits, GET /v1/audits/{id}; 1.2: GET /v1/runs/{id}/stream
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
@@ -34,6 +36,8 @@ GRID_CONFIGS: dict[str, str] = {"wikitext2": "configs/grid.yaml", "tinystories":
 DEPLOYED_MODEL = "reports/risk/model.json"  # written by python -m src.risk.classifier
 MAX_UPLOAD_BYTES = 20 * 2**20
 MAX_SAMPLES = 20_000
+STREAM_POLL_SECONDS = 0.5   # how often a stream checks its trainlog for new rows
+STREAM_IDLE_SECONDS = 60.0  # a log quiet this long is a finished run: the stream ends
 AuditId = Annotated[str, PathParam(pattern=r"^[0-9a-f]{32}$")]
 # a file name, never a path: no separators, no leading dot
 RunId = Annotated[str, PathParam(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
@@ -331,6 +335,13 @@ def _with_prefix(row: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {k[len(prefix):]: v for k, v in row.items() if k.startswith(prefix)}
 
 
+def _trainlog_row(r: dict[str, Any]) -> dict[str, Any]:
+    """A trainlog/1 file row as the API serves it (``TrainlogRow``)."""
+    return {"run_id": r["run_id"], "step": r["step"], "holdout_loss": r["holdout_loss"],
+            "signals": _with_prefix(r, "sig_"), "alarm": r["alarm"],
+            "alarm_signal": r["alarm_signal"] and r["alarm_signal"].removeprefix("sig_")}
+
+
 # ---------------------------------------------------------------- audit jobs
 
 # (samples, deployed model, benchmark texts) -> (audit/1 report, per-sample score rows)
@@ -468,10 +479,50 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
     @app.get("/v1/runs/{run_id}/trainlog", response_model=list[TrainlogRow], tags=["runs"])
     def trainlog(run_id: RunId, request: Request, response: Response) -> Any:
         rel = f"reports/trainlogs/{run_id}.jsonl"
-        return _cached(request, response, reports.etag(rel)) or [
-            {**r, "signals": _with_prefix(r, "sig_"),
-             "alarm_signal": r["alarm_signal"] and r["alarm_signal"].removeprefix("sig_")}
-            for r in reports.jsonl(rel)]
+        return _cached(request, response, reports.etag(rel)) or [_trainlog_row(r) for r in reports.jsonl(rel)]
+
+    stream_doc = {200: {"description": "Server-Sent Events: `event: row` (`id` = step, `data` = one "
+                        "TrainlogRow as JSON) for every logged row, existing ones first, then live; "
+                        "`event: reset` if a new run restarts the log; `event: end` once the log has "
+                        "been quiet for a while (a finished run ends right after its replay). "
+                        "Send `Last-Event-ID` to resume after a step.",
+                        "content": {"text/event-stream": {"schema": {"type": "string"}}}}}
+
+    @app.get("/v1/runs/{run_id}/stream", tags=["runs"], response_class=StreamingResponse,
+             response_model=None, responses=stream_doc)
+    async def trainlog_stream(run_id: RunId, request: Request) -> StreamingResponse:
+        """The run's trainlog as it is written (X3 live monitor)."""
+        path = reports.path(f"reports/trainlogs/{run_id}.jsonl")
+        if not path.is_file():
+            raise HTTPException(404, f"reports/trainlogs/{run_id}.jsonl has not been produced yet")
+        last = request.headers.get("last-event-id", "")
+        after = int(last) if last.isdigit() else -1
+
+        async def events() -> Any:
+            pos, buf, after_step = 0, "", after
+            while not await request.is_disconnected():
+                size = path.stat().st_size if path.exists() else 0
+                if size < pos:  # truncated: a new run started this log, so send it all
+                    pos, buf, after_step = 0, "", -1
+                    yield "event: reset\ndata: {}\n\n"
+                if size > pos:
+                    with path.open("rb") as fh:
+                        fh.seek(pos)
+                        chunk = fh.read(size - pos)
+                    pos += len(chunk)
+                    *lines, buf = (buf + chunk.decode("utf-8")).split("\n")
+                    for line in lines:
+                        if line.strip():
+                            row = _trainlog_row(json.loads(line))
+                            if row["step"] > after_step:
+                                yield f"id: {row['step']}\nevent: row\ndata: {json.dumps(row)}\n\n"
+                elif not path.exists() or time.time() - path.stat().st_mtime > STREAM_IDLE_SECONDS:
+                    yield "event: end\ndata: {}\n\n"
+                    return
+                await asyncio.sleep(STREAM_POLL_SECONDS)
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     @app.get("/v1/bench/samples", response_model=list[BenchSample], tags=["bench"])
     def bench_samples(

@@ -75,8 +75,8 @@ def test_committed_openapi_json_matches_the_code():
         "(and remember v1 is frozen: additive changes only)")
 
 
-# the audit job routes have their own tests below
-AUDIT_PATHS = {"/v1/audits", "/v1/audits/{audit_id}"}
+# the audit job routes and the SSE stream have their own tests below
+AUDIT_PATHS = {"/v1/audits", "/v1/audits/{audit_id}", "/v1/runs/{run_id}/stream"}  # + the SSE stream
 
 
 def test_every_route_in_the_spec_returns_schema_valid_data(client):
@@ -290,3 +290,91 @@ def test_the_default_runner_wires_the_audit_and_both_scores(monkeypatch):
                       {"sample_id": "y", "method": "risk_reflm", "score": None},
                       {"sample_id": "x", "method": "risk_knn", "score": -0.25},
                       {"sample_id": "y", "method": "risk_knn", "score": -0.5}]
+
+# ---------------------------------------------------------------- the trainlog SSE stream (#36)
+
+RUN = "wikitext2_synthetic_r1_s0"
+
+
+def _events(response):
+    """Parse an SSE body into (event, id, data) triples."""
+    out, cur = [], {}
+    for line in response.iter_lines():
+        if not line:
+            if cur:
+                out.append((cur.get("event"), cur.get("id"), json.loads(cur.get("data", "null"))))
+            cur = {}
+        elif not line.startswith(":"):
+            key, _, value = line.partition(": ")
+            cur[key] = value
+    return out
+
+
+@pytest.fixture
+def fast_stream(monkeypatch):
+    monkeypatch.setattr(api, "STREAM_POLL_SECONDS", 0.02)
+    monkeypatch.setattr(api, "STREAM_IDLE_SECONDS", 0.3)
+
+
+def _age(path, seconds=10):
+    import os
+    import time
+
+    os.utime(path, (time.time() - seconds, time.time() - seconds))
+
+
+def test_a_finished_run_replays_every_row_then_ends(client, root, fast_stream):
+    _age(root / f"reports/trainlogs/{RUN}.jsonl")
+    with client.stream("GET", f"/v1/runs/{RUN}/stream") as r:
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+        events = _events(r)
+    rows = [e for e in events if e[0] == "row"]
+    assert [int(i) for _, i, _ in rows] == list(range(0, 250, 25))
+    assert rows[5][2]["alarm"] and rows[5][2]["alarm_signal"] == "anisotropy_last"  # same shape as /trainlog
+    assert rows[0][2] == client.get(f"/v1/runs/{RUN}/trainlog").json()[0]
+    assert events[-1][0] == "end"
+
+
+def test_last_event_id_resumes_after_that_step(client, root, fast_stream):
+    _age(root / f"reports/trainlogs/{RUN}.jsonl")
+    with client.stream("GET", f"/v1/runs/{RUN}/stream", headers={"Last-Event-ID": "175"}) as r:
+        steps = [int(i) for e, i, _ in _events(r) if e == "row"]
+    assert steps == [200, 225]
+
+
+def test_rows_written_during_the_stream_arrive_live_and_a_restart_resets(client, root, fast_stream,
+                                                                         monkeypatch):
+    import threading
+    import time
+
+    monkeypatch.setattr(api, "STREAM_IDLE_SECONDS", 1.0)  # well above the writer's 0.1 s gaps, even on slow CI
+    path = root / "reports/trainlogs/live_run.jsonl"
+    first = json.loads((root / f"reports/trainlogs/{RUN}.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+    def row(step):
+        return json.dumps({**first, "run_id": "live_run", "step": step}) + "\n"
+
+    path.write_text(row(0), encoding="utf-8")
+
+    def writer():
+        time.sleep(0.1)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(row(10))
+        time.sleep(0.1)
+        path.write_text(row(0), encoding="utf-8")  # a new run truncates the log
+        time.sleep(0.1)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(row(5))
+
+    t = threading.Thread(target=writer)
+    t.start()
+    with client.stream("GET", "/v1/runs/live_run/stream") as r:
+        events = [(e, i) for e, i, _ in _events(r)]
+    t.join()
+    assert events == [("row", "0"), ("row", "10"), ("reset", None), ("row", "0"), ("row", "5"), ("end", None)]
+
+
+def test_stream_errors_are_problem_json(client):
+    assert client.get("/v1/runs/missing_run/stream").status_code == 404
+    r = client.get("/v1/runs/.hidden/stream")
+    assert r.status_code == 422 and r.headers["content-type"] == "application/problem+json"
