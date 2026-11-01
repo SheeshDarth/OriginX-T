@@ -93,6 +93,35 @@ class LogReg:
     def predict(self, rows: Sequence[Mapping[str, Any]]) -> list[float]:
         return [_sigmoid(sum(wj * xj for wj, xj in zip(self.w, self._x(r))) + self.b) for r in rows]
 
+    def contributions(self, row: Mapping[str, Any]) -> dict[str, float]:
+        """Each feature's push on the log-odds, w_j * standardised x_j (the bias excluded)."""
+        return {c: wj * xj for c, wj, xj in zip(self.cols, self.w, self._x(row))}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"cols": self.cols, "mean": self.mean, "std": self.std, "w": self.w, "b": self.b}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> "LogReg":
+        m = cls()
+        m.cols, m.mean, m.std, m.w, m.b = list(d["cols"]), list(d["mean"]), list(d["std"]), list(d["w"]), d["b"]
+        return m
+
+
+def fit_deployed(rows: Sequence[Mapping[str, Any]], *, alpha: float = ALPHA, cal_fraction: float = 1 / 3,
+                 **fit: Any) -> dict[str, Any]:
+    """The model the audit uses: fitted on all labelled cells but a calibration share, which sets q.
+
+    ``q`` is ``None`` when the calibration set is too small for ``alpha`` (q = infinity: every set is {0, 1}).
+    """
+    rows = list(rows)
+    random.Random("cal-deployed").shuffle(rows)
+    n_cal = round(len(rows) * cal_fraction)
+    cal, train = rows[:n_cal], rows[n_cal:]
+    model = LogReg(**fit).fit(train, [r["label"] for r in train], feature_columns(rows))
+    q = conformal.quantile([conformal.nonconformity(p, r["label"]) for r, p in zip(cal, model.predict(cal))], alpha)
+    return {"model": MODEL, **model.to_dict(), "alpha": alpha, "q": None if math.isinf(q) else q,
+            "n_train": len(train), "n_cal": len(cal)}
+
 
 def feature_columns(rows: Sequence[Mapping[str, Any]]) -> list[str]:
     """Every f_* column with at least one value."""
@@ -195,6 +224,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         preds += lodo
     out = Path(args.out_dir)
     _write_jsonl(out / "predictions.jsonl", risk_rows(preds))
+    deployed = {**fit_deployed(rows), "feature_version": sorted({r["feature_version"] for r in rows})}
+    (out / "model.json").write_text(json.dumps(deployed, indent=2) + "\n", encoding="utf-8", newline="\n")
     (out / "evaluation.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8", newline="\n")
     lt = report["leave_one_type_out"]
     print(f"leave-one-type-out: n={lt['n']} ({lt['n_degraded']} degraded), "
