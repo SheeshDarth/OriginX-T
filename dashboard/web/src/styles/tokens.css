@@ -14,12 +14,7 @@
   --ok: 21 128 61;
   --warn: 180 83 9;
   --bad: 185 28 28;
-  /* fixed contamination palette, as in reports/figures */
-  --type-synthetic: #2a78d6;
-  --type-recursive: #eb6834;
-  --type-paraphrased: #1baf7a;
-  --type-benchmark_near: #eda100;
-  --type-human_control: #8a8a8a;
+  /* the contamination palette lives in src/components/charts.tsx (TYPE_COLORS) */
   color-scheme: light dark;
 }
 
