@@ -15,7 +15,7 @@ Each grid cell's exact training set (1000 samples, rebuilt from the cached pools
 - **sem** (Track C): embedding crowding, cluster entropy, tail retention and MAUVE against the
   seed's clean human draw.
 
-All 75 cells have every feature (`reports/features/wikitext2.jsonl`, `lex@1+leak@1+model@1+sem@1`).
+All 75 cells have every feature (`reports/features/wikitext2.jsonl`, `lex@1+leak@1+model@1+sem@2`).
 
 ## 2. Label and evaluation design
 **Label (D4, default).** A cell is *degraded* if its hidden-holdout perplexity exceeds its own
@@ -50,16 +50,16 @@ Source: `reports/risk/evaluation.json`, `reports/risk/predictions.jsonl`.
 |---|---|
 | AUROC | **0.84** [0.71, 0.94] |
 | AUPRC | 0.95 [0.90, 0.99] |
-| ECE | 0.24 |
-| Conformal coverage (target 0.90) | **0.63** [0.52, 0.75], mean set size 0.82 |
-| vs mean-GPT-2-loss baseline (AUROC 0.84) | difference 0.00 [0.00, 0.00]: **ties, does not beat** |
+| ECE | 0.22 |
+| Conformal coverage (target 0.90) | **0.72** [0.60, 0.83], mean set size 0.87 |
+| vs mean-GPT-2-loss baseline (AUROC 0.84) | difference +0.001 [0.000, 0.008]: **ties, does not beat** |
 
 | Held-out type | Degraded | Mean p(degrade) | Coverage |
 |---|---|---|---|
 | recursive | 12/12 | 1.00 | 1.00 |
 | synthetic | 12/12 | 0.78 | 0.50 |
-| paraphrased | 12/12 | 0.52 | 0.25 |
-| human_control | 0/12 | 0.06 | 1.00 |
+| paraphrased | 12/12 | 0.65 | 0.67 |
+| human_control | 0/12 | 0.05 | 1.00 |
 | benchmark_near | 7/12 | **0.00** | 0.42 |
 
 **Reading:**
@@ -70,11 +70,11 @@ Source: `reports/risk/evaluation.json`, `reports/risk/predictions.jsonl`.
    read them as human. When benchmark_near is held out, no training type has a nonzero leak
    feature, so the model can't learn that leak features matter. This is why the audit (§5)
    flags leaks with a rule rather than relying on the score.
-3. **Coverage of 0.63 is below the 0.90 target.** That's expected rather than a failure of the
+3. **Coverage of 0.72 is below the 0.90 target.** That's expected rather than a failure of the
    method: the guarantee needs calibration and test cells to be exchangeable, and holding out a
    type breaks that on purpose.
-4. **H2 is not supported on WikiText.** The multi-feature model ties mean GPT-2 loss exactly, on
-   every bootstrap resample, so it ranks the cells as that one feature does.
+4. **H2 is not supported on WikiText.** The multi-feature model ties mean GPT-2 loss (+0.001, CI
+   [0.000, 0.008]), so it ranks the cells almost exactly as that one feature does.
    Single features (`f_model_loss_std` 0.995, `f_lex_entropy` 0.977) score higher, but they were
    chosen after looking at the results, so they're descriptive only.
 5. **XGBoost** on the same folds, descriptive only: AUROC 0.86 [0.75, 0.95], coverage 0.83, ECE
