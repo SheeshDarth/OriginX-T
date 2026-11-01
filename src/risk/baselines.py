@@ -5,7 +5,7 @@ direction (does a higher value mean more risk?) is learned on the training fold
 only, from the sign of mean(feature | degraded) - mean(feature | clean). Same
 out-of-group folds as the model, so the two are scored on the same test cells.
 
-- ``ref_lm_loss`` (§8.2 b): ``f_model_ref_loss_mean``, from Track C's ``model`` family.
+- ``ref_lm_loss`` (§8.2 b): ``f_model_loss_mean``, from Track C's ``model`` family.
 - The AI-text detector (§8.2 a) becomes a baseline the same way once a ``detector``
   feature family exists: add its column to ``BASELINES``.
 
@@ -24,7 +24,7 @@ from typing import Any, Mapping, Sequence
 from ..evaluation.scoring import auroc, bootstrap_ci
 from .classifier import KEYS
 
-BASELINES = {"ref_lm_loss": "f_model_ref_loss_mean"}
+BASELINES = {"ref_lm_loss": "f_model_loss_mean"}
 
 
 def _mean(xs: list[float]) -> float:
