@@ -184,8 +184,8 @@ def audits(root):
     (root / "reports/risk/model.json").write_text(json.dumps(DEPLOYED), encoding="utf-8")
     calls = []
 
-    def runner(samples, deployed, bench):
-        calls.append((samples, deployed, bench))
+    def runner(samples, deployed, bench, reference):
+        calls.append((samples, deployed, bench, reference))
         if samples[0].response == "boom":
             raise RuntimeError("the model fell over")
         return _report(len(samples)), [{"sample_id": s.sample_id, "method": "risk_reflm", "score": -3.0}
@@ -219,9 +219,20 @@ def test_an_upload_becomes_a_job_that_finishes_with_a_typed_report(audits):
     assert done["report"]["schema"] == "audit/1" and report.p_degrade == 0.7
     assert [s["sample_id"] for s in done["scores"]] == ["a", "my data-0000001"]
     assert done["scores"][0]["higher_is"] == "worse"
-    samples, deployed, bench = calls[0]
+    samples, deployed, bench, reference = calls[0]
     assert [s.response for s in samples] == ["the cat sat on the mat", "an answer"]  # same aliases as files
-    assert deployed == DEPLOYED and bench == []
+    assert deployed == DEPLOYED and bench == [] and reference == []
+
+
+def test_a_benchmark_brings_its_grid_s_reference_for_the_sem_features(audits, monkeypatch):
+    from src.risk import audit as audit_mod
+
+    client, calls = audits
+    monkeypatch.setattr(audit_mod, "grid_benchmark", lambda cfg: ["leaked item"])
+    monkeypatch.setattr(audit_mod, "grid_reference", lambda cfg: ["clean human text"])
+    r = client.post("/v1/audits?benchmark=wikitext2", content=JSONL)
+    assert _finish(client, r.headers["location"])["status"] == "done"
+    assert calls[0][2:] == (["leaked item"], ["clean human text"])
 
 
 def test_a_failing_audit_is_reported_not_raised(audits):

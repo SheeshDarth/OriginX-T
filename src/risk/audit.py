@@ -53,12 +53,17 @@ def flag_samples(texts: Sequence[str], ids: Sequence[str], bench: Sequence[str])
 
 
 def audit(texts: Sequence[str], ids: Sequence[str], deployed: Mapping[str, Any],
-          bench: Sequence[str] = ()) -> dict[str, Any]:
+          bench: Sequence[str] = (), reference: Sequence[str] = ()) -> dict[str, Any]:
+    """``reference``: clean human texts for the sem family's reference columns (``grid_reference``);
+    without them cluster_entropy, mauve and tail_retention are missing."""
     model = LogReg.from_dict(deployed)
+    ctx: dict[str, Any] = {"benchmark": list(bench), "device": _device("auto")}
+    if reference:
+        ctx["reference_texts"] = list(reference)
     feats: dict[str, Any] = {}
     for name, family in FAMILIES.items():
         try:
-            feats.update(features_for(list(texts), {name: family}, {"benchmark": list(bench), "device": _device("auto")}))
+            feats.update(features_for(list(texts), {name: family}, ctx))
         except ImportError:  # a family whose libraries (torch, ...) are not installed: its columns go missing
             pass
     p = model.predict([feats])[0]
@@ -96,10 +101,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     args = p.parse_args(argv)
     samples = load_dataset(args.dataset)
     bench = [s.response for s in load_dataset(args.benchmark)] if args.benchmark else []
+    reference: list[str] = []
     if args.grid:
-        bench = grid_benchmark(args.grid)
+        bench, reference = grid_benchmark(args.grid), grid_reference(args.grid)
     deployed = json.loads(Path(args.model).read_text(encoding="utf-8"))
-    report = audit([training_text(s) for s in samples], [s.sample_id for s in samples], deployed, bench)
+    report = audit([training_text(s) for s in samples], [s.sample_id for s in samples], deployed, bench, reference)
     text = json.dumps(report, indent=2) + "\n"
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8", newline="\n")
@@ -122,6 +128,20 @@ def grid_benchmark(grid_config: str | Path) -> list[str]:
     d = yaml.safe_load(Path(grid_config).read_text(encoding="utf-8"))["data"]
     return [s.response for s in _pick(load_dataset(d["benchmark"]), d["n_benchmark"], d["min_words"],
                                       d["max_words"], random.Random("benchmark"))]
+
+
+
+def grid_reference(grid_config: str | Path) -> list[str]:
+    """Seed 0's clean human training set of a grid: the sem family's reference, as the suite
+    uses for seed-0 cells (each cell is measured against its own seed's draw)."""
+    import yaml
+
+    from ..finetune.collapse import training_text
+    from ..finetune.grid import draw_human
+    from ..ingestion.loaders import load_dataset
+
+    d = yaml.safe_load(Path(grid_config).read_text(encoding="utf-8"))["data"]
+    return [training_text(s) for s in draw_human(load_dataset(d["kept"]), d, 0)[0]]
 
 
 if __name__ == "__main__":
