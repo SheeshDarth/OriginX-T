@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The only colour source (HANDBOOK §8.6): neutral greys, one accent, state colours.
+   Values are space-separated RGB so Tailwind can apply opacity. */
+:root {
+  --bg: 250 250 250;
+  --surface: 255 255 255;
+  --border: 228 228 231;
+  --fg: 24 24 27;
+  --muted: 113 113 122;
+  --accent: 42 120 214;
+  --ok: 21 128 61;
+  --warn: 180 83 9;
+  --bad: 185 28 28;
+  /* fixed contamination palette, as in reports/figures */
+  --type-synthetic: #2a78d6;
+  --type-recursive: #eb6834;
+  --type-paraphrased: #1baf7a;
+  --type-benchmark_near: #eda100;
+  --type-human_control: #8a8a8a;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 17 17 19;
+    --surface: 24 24 27;
+    --border: 48 48 54;
+    --fg: 236 236 238;
+    --muted: 161 161 170;
+    --accent: 96 160 240;
+    --ok: 74 200 120;
+    --warn: 240 170 60;
+    --bad: 240 100 100;
+  }
+}
+
+body {
+  @apply bg-bg text-fg font-sans;
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  @apply outline outline-2 outline-offset-2 outline-accent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
