@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Gate } from "../api/client";
+import { EvaluationCard } from "../components/EvaluationCard";
 import { QueryView } from "../components/QueryView";
 import { StatusBadge } from "../components/StatusBadge";
 
@@ -14,6 +15,10 @@ export function evidence(g: Gate): string {
   if (g.id === "gate_0") {
     const seeds = Object.values(d.per_seed as Record<string, boolean>);
     return `${seeds.filter(Boolean).length}/${seeds.length} seeds raise holdout ppl`;
+  }
+  if (g.id === "gate_1") {
+    const ds = d.datasets as string[];
+    return `features on ${ds.length} of 2 datasets needed (${ds.join(", ")})`;
   }
   if (g.id === "gate_2") {
     return Object.entries(d.types as Record<string, string>)
@@ -95,6 +100,7 @@ export function Overview() {
           </table>
         )}
       </QueryView>
+      <EvaluationCard />
     </section>
   );
 }

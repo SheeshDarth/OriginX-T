@@ -66,6 +66,7 @@ export function curvesPlot(
     x: {
       label: "Contamination ratio (share of training set)",
       ticks: [0, 0.25, 0.5, 0.75, 1],
+      tickFormat: (d: number) => String(d), // Plot would round 0.25 to "0.3"
     },
     y: { label: `${METRIC_LABEL[metric]} (lower is better)`, grid: true },
     color: {
