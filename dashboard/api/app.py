@@ -182,11 +182,12 @@ class RiskScores(Model):
 
 class BaselineComparison(Model):
     column: str
-    n: int
-    auroc_model: float
-    auroc_baseline: float
-    difference: Estimate
-    model_beats_baseline: bool
+    n: Optional[int] = None                       # all but column are absent when not comparable;
+    auroc_model: Optional[float] = None           # note then says why (src/risk/baselines.py)
+    auroc_baseline: Optional[float] = None
+    difference: Optional[Estimate] = None
+    model_beats_baseline: Optional[bool] = None
+    note: Optional[str] = None
 
 
 class RiskBaselines(Model):
