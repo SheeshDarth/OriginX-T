@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { TYPES } from "./components/charts";
+import { Audit } from "./routes/Audit";
 import { CellDetail } from "./routes/CellDetail";
 import { Curves } from "./routes/Curves";
 import { Overview } from "./routes/Overview";
@@ -14,6 +15,7 @@ import { Overview } from "./routes/Overview";
 const COMMANDS: Command[] = [
   { label: "Overview", to: "/" },
   { label: "Collapse curves", to: "/curves" },
+  { label: "Audit a dataset", to: "/audit" },
   ...["gate_0", "gate_1", "gate_2", "gate_3", "x1", "x2", "x3"].map((id) => ({
     label: `Gate ${id.replace("gate_", "").toUpperCase()}`,
     to: "/",
@@ -46,6 +48,9 @@ const root = createRootRoute({
           <Link to="/curves" className="text-muted [&.active]:text-fg">
             Collapse curves
           </Link>
+          <Link to="/audit" className="text-muted [&.active]:text-fg">
+            Audit
+          </Link>
         </nav>
         <kbd className="ml-auto font-mono text-xs text-muted">Ctrl K</kbd>
       </header>
@@ -59,6 +64,7 @@ const root = createRootRoute({
 
 export const routeTree = root.addChildren([
   createRoute({ getParentRoute: () => root, path: "/", component: Overview }),
+  createRoute({ getParentRoute: () => root, path: "/audit", component: Audit }),
   createRoute({
     getParentRoute: () => root,
     path: "/curves",

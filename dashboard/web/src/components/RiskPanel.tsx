@@ -4,6 +4,13 @@ import { QueryView } from "./QueryView";
 
 const OUTCOME = ["no degrade", "degrade"];
 
+/** A probability as a percentage that never claims certainty: ">99%" rather than "100%". */
+export function pct(p: number): string {
+  if (p > 0.995) return ">99%";
+  if (p < 0.005) return "<1%";
+  return `${(p * 100).toFixed(0)}%`;
+}
+
 /** The conformal set in plain words (HANDBOOK §8.6). */
 export function conformalSentence(set: number[], alpha: number): string {
   const cov = `At ${Math.round((1 - alpha) * 100)}% coverage`;
@@ -57,9 +64,7 @@ export function RiskPanel({
           return (
             <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 text-sm">
               <span>
-                <span className="font-mono text-2xl">
-                  {(r.p_degrade * 100).toFixed(0)}%
-                </span>{" "}
+                <span className="font-mono text-2xl">{pct(r.p_degrade)}</span>{" "}
                 <span className="text-muted">p(degrade)</span>
               </span>
               <span
