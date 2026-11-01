@@ -628,8 +628,11 @@ These follow Track A's feature-family signature, `family(texts, ctx) -> dict[str
       `mauve`; clusters are fitted once per seed on its ratio-0 texts (k = 20, seed 0).
       **Track B:** `semantic.cluster_assignments(texts, {"reference_texts": ...})` returns
       each text's cluster and the tail clusters.
-- [ ] **Per-sample** versions (ref-LM loss, kNN distance) → §7.3 with `method:"risk_<name>"`.
-      Track B's X1 compares against them.
+- [x] **Per-sample** versions (ref-LM loss, kNN distance) → §7.3 with `method:"risk_<name>"`.
+      Track B's X1 compares against them. Done (#33): `python -m src.features.scores` writes
+      `reports/scores/risk_reflm/` (minus the ref-LM loss) and `risk_knn/` (minus the in-cell
+      kNN distance) for every sample of every ratio > 0 cell, plus `<dataset>_eval.json`
+      (AUROC vs `true_source`, pooled and per type).
 - [ ] Tests with stub models and stub embeddings (no torch in CI), with hand-checked expected
       values.
 - [ ] Run both families on the WikiText and TinyStories grids by CP1, so GATE 1 has full features.
