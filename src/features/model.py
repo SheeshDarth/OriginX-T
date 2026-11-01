@@ -34,6 +34,7 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from typing import Any, Optional
 
+VERSION = 1  # bump when a column's definition changes (the suite recomputes)
 REFERENCE_MODEL = "openai-community/gpt2"  # "gpt2"; the full id resolves from the local cache
 COLUMNS = ("loss_mean", "loss_p90", "loss_std", "rank_log_mean", "rank_top10", "rank_instability")
 

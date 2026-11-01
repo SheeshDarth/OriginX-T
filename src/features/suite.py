@@ -9,9 +9,12 @@ passed to every registered family.
 
 **Family signature.** ``family(texts: list[str], ctx) -> dict[str, float | None]``.
 ``ctx`` is a dict shared by all families: ``benchmark`` (the grid's benchmark item
-texts), ``dataset`` and ``cell``. The suite prefixes each key as ``f_<family>_<key>``.
-A family module also has an int ``VERSION``; ``feature_version`` records them
-(``lex@1+leak@1``). Track C adds ``model``/``sem`` by adding them to ``FAMILIES``.
+texts), ``dataset``, ``cell``, ``type``, ``ratio``, ``seed``, ``reference_texts`` (the
+seed's ratio-0 training texts, the clean human draw that ``sem`` compares against),
+and from the config ``device`` and ``max_len`` (the grid's ``train.max_len``). The
+suite prefixes each key as ``f_<family>_<key>``. A family module also has an int
+``VERSION``; ``feature_version`` records them (``lex@1+leak@1``). ``model`` and ``sem``
+are Track C's (§10.7); they load their models lazily, on first use.
 
 **Resumable.** Rows already in the output with the current ``feature_version`` are
 kept and their cells skipped; the file is rewritten atomically after every cell.
@@ -22,15 +25,18 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-from . import leak, lex
+from . import leak, lex, model, semantic
 
 Family = Callable[[list[str], Mapping[str, Any]], Mapping[str, Optional[float]]]
 FAMILIES: dict[str, tuple[Family, int]] = {
     "lex": (lex.lex, lex.VERSION),
     "leak": (leak.leak, leak.VERSION),
+    "model": (model.model, model.VERSION),
+    "sem": (semantic.semantic, semantic.VERSION),
 }
 
 
@@ -70,6 +76,13 @@ def run_suite(
     rows = [r for r in rows if r.get("feature_version") == version]
     done = {r["cell"] for r in rows}
     baseline: dict[int, tuple[int, dict[str, Any]]] = {}  # seed -> (n_samples, features) at ratio 0
+    references: dict[int, list[str]] = {}  # seed -> its ratio-0 texts (the same for every type)
+
+    def reference(cell: Any) -> list[str]:
+        if cell.seed not in references:
+            references[cell.seed] = texts_for(replace(cell, ratio=0.0))
+        return references[cell.seed]
+
     for cell in cells:
         if cell.id in done:
             continue
@@ -77,7 +90,11 @@ def run_suite(
             n, feats = baseline[cell.seed]
         else:
             texts = texts_for(cell)
-            n, feats = len(texts), features_for(texts, families, {**(ctx or {}), "dataset": dataset, "cell": cell.id})
+            if cell.ratio == 0:
+                references.setdefault(cell.seed, texts)
+            cell_ctx = {**(ctx or {}), "dataset": dataset, "cell": cell.id, "type": cell.type,
+                        "ratio": cell.ratio, "seed": cell.seed, "reference_texts": reference(cell)}
+            n, feats = len(texts), features_for(texts, families, cell_ctx)
             if cell.ratio == 0:
                 baseline[cell.seed] = (n, feats)
         row = {"schema": "features/1", "dataset": dataset, "cell": cell.id, "type": cell.type,
@@ -86,6 +103,17 @@ def run_suite(
         _write(out, rows)
         on_row(row)
     return rows
+
+
+def _device(setting: str) -> str:
+    """``auto`` is CUDA when torch can see a GPU, else CPU; anything else is used as given."""
+    if setting != "auto":
+        return setting
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -114,7 +142,9 @@ def main(argv: list[str] | None = None) -> None:
     out = Path(cfg["output_dir"]) / f"{args.dataset}.jsonl"
     rows = run_suite(
         args.dataset, cells, lambda c: [training_text(s) for s in training_set(grid, c, kept=kept)], out,
-        families=families, ctx={"benchmark": [s.response for s in bench]},
+        families=families,
+        ctx={"benchmark": [s.response for s in bench], "device": _device(cfg.get("device", "auto")),
+             "max_len": grid["train"]["max_len"]},
         on_row=lambda r: print(f"  {r['cell']}: {r['n_samples']} samples", flush=True),
     )
     print(f"{len(rows)} cells -> {out}")

@@ -389,16 +389,20 @@ model saw. Need another helper? Ask Vishnu to expose it (Track C, same day).
       one function signature, `family(texts: list[str], ctx) -> dict[str, float]`, so
       Track C's `model.py` and `semantic.py` (§10.7) plug in without changes here. Until
       they land, the suite runs with `lex` + `leak` only and leaves their columns out.
-      **The contract** (fixed by #31, which `model.py` already follows):
+      **The contract** (as `src/features/suite.py` implements it; all four families follow it):
       - `texts` are the cell's `training_text(sample)` strings.
       - A family returns **bare** names (`loss_mean`); the suite writes them as
-        `f_<family>_<name>` (`f_model_loss_mean`). The family name is the function's
-        (`src.features.model.model` is family `model`).
+        `f_<family>_<name>` (`f_model_loss_mean`), where the family name is its key in
+        `suite.FAMILIES` (`lex`, `leak`, `model`, `sem`). Enable families in
+        `configs/features.yaml`.
+      - Each family module has an int `VERSION`; rows record `feature_version`
+        (`lex@1+leak@1+model@1+sem@1`) and a bump recomputes that grid's rows.
       - Values are `float` or `None` (not computable). A family never raises on short or
         empty input; it returns `None`s.
-      - `ctx` is a plain `dict`: `{"dataset", "cell", "type", "ratio", "seed", "device",
-        "batch_size", "max_len"}` (`max_len` = the grid's `train.max_len`). Families read
-        it with `.get(key, default)` and ignore keys they don't use.
+      - `ctx` is a plain `dict`: `benchmark`, `dataset`, `cell`, `type`, `ratio`, `seed`,
+        `reference_texts` (the seed's ratio-0 texts, the clean draw), `device` (config
+        `device: auto` = CUDA if available) and `max_len` (the grid's `train.max_len`).
+        Families read it with `.get(key, default)` and ignore keys they don't use.
 - [ ] Tests on tiny stub corpora with hand-computed expected values (entropy of "a a b" etc.).
 - *Moved to Track C (§10.7):* `model.py` (reference-LM features) and `semantic.py`
   (embedding, cluster and MAUVE features), including their per-sample scores.
@@ -616,11 +620,14 @@ These follow Track A's feature-family signature, `family(texts, ctx) -> dict[str
       reference model (`gpt2`, never one of the grid's checkpoints), plus token-rank
       instability. Lazy torch. Done (#31): `loss_mean/p90/std`, `rank_log_mean`,
       `rank_top10`, `rank_instability`; `per_text` gives the per-sample values for C10.
-- [ ] `src/features/semantic.py`: sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`):
+- [x] `src/features/semantic.py`: sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`):
       density (mean kNN distance), cluster entropy (k-means, fixed k and seed), tail-cluster
       retention vs the ratio-0 set, MAUVE vs the human draw (`mauve-text`, already in
       requirements). Expose the cluster assignments: Track B's rare-cluster preservation
-      (§9.4) needs them.
+      (§9.4) needs them. Done (#32): `f_sem_knn_dist`, `cluster_entropy`, `tail_retention`,
+      `mauve`; clusters are fitted once per seed on its ratio-0 texts (k = 20, seed 0).
+      **Track B:** `semantic.cluster_assignments(texts, {"reference_texts": ...})` returns
+      each text's cluster and the tail clusters.
 - [ ] **Per-sample** versions (ref-LM loss, kNN distance) → §7.3 with `method:"risk_<name>"`.
       Track B's X1 compares against them.
 - [ ] Tests with stub models and stub embeddings (no torch in CI), with hand-checked expected
