@@ -1,0 +1,174 @@
+{
+  "model": "logreg@1",
+  "label": "D4 default (HANDBOOK \u00a713)",
+  "features": [
+    "f_leak_frac_above_0_9",
+    "f_leak_max_sim",
+    "f_leak_mean_sim",
+    "f_lex_burstiness",
+    "f_lex_distinct_1",
+    "f_lex_distinct_2",
+    "f_lex_distinct_3",
+    "f_lex_entropy",
+    "f_lex_len_mean",
+    "f_lex_len_var",
+    "f_lex_repeat_3gram",
+    "f_lex_ttr",
+    "f_model_loss_mean",
+    "f_model_loss_p90",
+    "f_model_loss_std",
+    "f_model_rank_instability",
+    "f_model_rank_log_mean",
+    "f_model_rank_top10",
+    "f_sem_cluster_entropy",
+    "f_sem_knn_dist",
+    "f_sem_mauve",
+    "f_sem_tail_retention"
+  ],
+  "leave_one_type_out": {
+    "n": 60,
+    "n_degraded": 43,
+    "auroc": {
+      "value": 0.8084815321477428,
+      "ci95": [
+        0.6880616174582799,
+        0.9206349206349206
+      ]
+    },
+    "auprc": {
+      "value": 0.9373059538880769,
+      "ci95": [
+        0.8811343424747835,
+        0.9765655460669637
+      ]
+    },
+    "ece": 0.23879480397949357,
+    "reliability": [
+      {
+        "lo": 0.0,
+        "hi": 0.1,
+        "n": 19,
+        "confidence": 0.033390234225730016,
+        "accuracy": 0.3684210526315789
+      },
+      {
+        "lo": 0.1,
+        "hi": 0.2,
+        "n": 4,
+        "confidence": 0.14156759467490462,
+        "accuracy": 0.5
+      },
+      {
+        "lo": 0.2,
+        "hi": 0.3,
+        "n": 3,
+        "confidence": 0.23478540973654538,
+        "accuracy": 1.0
+      },
+      {
+        "lo": 0.3,
+        "hi": 0.4,
+        "n": 5,
+        "confidence": 0.355438513663059,
+        "accuracy": 0.6
+      },
+      {
+        "lo": 0.4,
+        "hi": 0.5,
+        "n": 5,
+        "confidence": 0.48347458700807505,
+        "accuracy": 0.8
+      },
+      {
+        "lo": 0.6,
+        "hi": 0.7,
+        "n": 1,
+        "confidence": 0.6087250099824246,
+        "accuracy": 1.0
+      },
+      {
+        "lo": 0.7,
+        "hi": 0.8,
+        "n": 1,
+        "confidence": 0.7552608998755227,
+        "accuracy": 1.0
+      },
+      {
+        "lo": 0.8,
+        "hi": 0.9,
+        "n": 4,
+        "confidence": 0.860950616209932,
+        "accuracy": 1.0
+      },
+      {
+        "lo": 0.9,
+        "hi": 1.0,
+        "n": 18,
+        "confidence": 0.9869398236099397,
+        "accuracy": 1.0
+      }
+    ],
+    "conformal": {
+      "alpha": 0.1,
+      "target": 0.9,
+      "coverage": {
+        "value": 0.5833333333333334,
+        "ci95": [
+          0.4666666666666667,
+          0.7
+        ]
+      },
+      "mean_set_size": 0.8,
+      "n_cal_per_fold": [
+        20
+      ]
+    }
+  },
+  "baselines": {
+    "ref_lm_loss": {
+      "column": "f_model_loss_mean",
+      "n": 60,
+      "auroc_model": 0.8084815321477428,
+      "auroc_baseline": 0.8372093023255814,
+      "difference": {
+        "value": -0.028727770177838674,
+        "ci95": [
+          -0.07407407407407407,
+          0.0
+        ]
+      },
+      "model_beats_baseline": false
+    },
+    "single_feature_auroc": {
+      "f_leak_frac_above_0_9": 0.4582763337893297,
+      "f_leak_max_sim": 0.8611491108071135,
+      "f_leak_mean_sim": 0.24623803009575923,
+      "f_lex_burstiness": 0.7578659370725034,
+      "f_lex_distinct_1": 0.9015047879616963,
+      "f_lex_distinct_2": 0.9261285909712722,
+      "f_lex_distinct_3": 0.9001367989056087,
+      "f_lex_entropy": 0.9767441860465116,
+      "f_lex_len_mean": 0.5581395348837209,
+      "f_lex_len_var": 0.39261285909712723,
+      "f_lex_repeat_3gram": 0.8372093023255814,
+      "f_lex_ttr": 0.9015047879616963,
+      "f_model_loss_mean": 0.8372093023255814,
+      "f_model_loss_p90": 0.8372093023255814,
+      "f_model_loss_std": 0.9945280437756497,
+      "f_model_rank_instability": 0.8372093023255814,
+      "f_model_rank_log_mean": 0.8372093023255814,
+      "f_model_rank_top10": 0.8372093023255814,
+      "f_sem_cluster_entropy": 0.5677154582763337,
+      "f_sem_knn_dist": 0.11491108071135431,
+      "f_sem_mauve": 0.6484268125854993,
+      "f_sem_tail_retention": 0.5957592339261286
+    }
+  },
+  "gate_1": {
+    "status": "not_evaluable",
+    "rule": "TRD \u00a711: feature suite + static baseline run cleanly on >= 2 datasets",
+    "datasets": [
+      "wikitext2"
+    ]
+  }
+}
