@@ -27,7 +27,7 @@ from src.ingestion.loaders import normalize_record
 from src.ingestion.schema import Sample
 
 REPO = Path(__file__).resolve().parents[2]
-API_VERSION = "1.2.0"  # 1.1: POST /v1/audits, GET /v1/audits/{id}; 1.2: GET /v1/runs/{id}/stream
+API_VERSION = "1.3.0"  # 1.1: audits; 1.2: GET /v1/runs/{id}/stream; 1.3: GET /v1/risk/evaluation
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
@@ -145,6 +145,71 @@ class RiskPrediction(Model):
     alpha: float
     model: str
     split: Literal["train", "cal", "test"]
+
+
+class Estimate(Model):
+    value: Optional[float] = None
+    ci95: Optional[list[float]] = None
+
+
+class ReliabilityBin(Model):
+    lo: float
+    hi: float
+    n: int
+    confidence: float
+    accuracy: float
+
+
+class ConformalCoverage(Model):
+    alpha: float
+    target: float
+    coverage: Estimate
+    mean_set_size: float
+    n_cal_per_fold: list[int] = []
+
+
+class RiskScores(Model):
+    """How the risk model scores on held-out groups (``src.risk.classifier.evaluate``)."""
+
+    n: int
+    n_degraded: int
+    auroc: Optional[Estimate] = None
+    auprc: Optional[Estimate] = None
+    ece: Optional[float] = None
+    reliability: list[ReliabilityBin] = []
+    conformal: Optional[ConformalCoverage] = None
+
+
+class BaselineComparison(Model):
+    column: str
+    n: int
+    auroc_model: float
+    auroc_baseline: float
+    difference: Estimate
+    model_beats_baseline: bool
+
+
+class RiskBaselines(Model):
+    ref_lm_loss: Optional[BaselineComparison] = None   # H2: the model vs one reference-LM feature
+    single_feature_auroc: dict[str, Optional[float]] = {}
+
+
+class Gate1(Model):
+    status: Literal["passed", "failed", "not_evaluable"]
+    rule: str
+    datasets: list[str]
+
+
+class RiskEvaluation(Model):
+    """``reports/risk/evaluation.json`` (``python -m src.risk.classifier``): GATE 1's numbers."""
+
+    model: str
+    label: str
+    features: list[str]
+    leave_one_type_out: RiskScores
+    leave_one_dataset_out: Optional[RiskScores] = None
+    baselines: RiskBaselines
+    gate_1: Gate1
 
 
 class RepairResult(Model):
@@ -313,7 +378,18 @@ def _gates(reports: Reports) -> list[Gate]:
     out.append(gate("gate_0", "pending") if spike is None else gate(
         "gate_0", "passed" if spike["gate_0_passed"] else "failed",
         details={"per_seed": spike["gate_0_per_seed"]}, source="reports/collapse_spike/metrics.json"))
-    out.append(gate("gate_1", "pending"))
+    ev = reports.json_or_none("reports/risk/evaluation.json")
+    if ev is None:
+        out.append(gate("gate_1", "pending"))
+    else:
+        lt, base = ev["leave_one_type_out"], ev["baselines"].get("ref_lm_loss") or {}
+        conformal = lt.get("conformal") or {}
+        g1 = gate("gate_1", ev["gate_1"]["status"], source="reports/risk/evaluation.json", details={
+            "datasets": ev["gate_1"]["datasets"], "auroc": (lt.get("auroc") or {}).get("value"),
+            "ece": lt.get("ece"), "coverage": (conformal.get("coverage") or {}).get("value"),
+            "coverage_target": conformal.get("target"),
+            "beats_ref_lm_baseline": base.get("model_beats_baseline")})
+        out.append(g1.model_copy(update={"rule": ev["gate_1"]["rule"]}))
     for dataset, folder in GRID_DIRS.items():
         summary = reports.json_or_none(f"{folder}/summary.json")
         if summary is not None:
@@ -440,7 +516,7 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
 
     @app.get("/v1/gates", response_model=list[Gate], tags=["gates"])
     def gates(request: Request, response: Response) -> Any:
-        files = ["reports/collapse_spike/metrics.json",
+        files = ["reports/collapse_spike/metrics.json", "reports/risk/evaluation.json",
                  *(f"{d}/{n}" for d in GRID_DIRS.values() for n in ("summary.json", "earlywarning.json"))]
         return _cached(request, response, reports.etag(*files)) or _gates(reports)
 
@@ -470,6 +546,12 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
     def risk(request: Request, response: Response) -> Any:
         rel = "reports/risk/predictions.jsonl"
         return _cached(request, response, reports.etag(rel)) or reports.jsonl(rel)
+
+    @app.get("/v1/risk/evaluation", response_model=RiskEvaluation, tags=["risk"])
+    def risk_evaluation(request: Request, response: Response) -> Any:
+        """The risk model's held-out AUROC/AUPRC/ECE, conformal coverage, baselines and GATE 1."""
+        rel = "reports/risk/evaluation.json"
+        return _cached(request, response, reports.etag(rel)) or reports.json(rel)
 
     @app.get("/v1/repair/{dataset}", response_model=list[RepairResult], tags=["repair"])
     def repair(dataset: Dataset, request: Request, response: Response) -> Any:

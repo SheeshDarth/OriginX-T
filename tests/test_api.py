@@ -27,6 +27,8 @@ def root(tmp_path):
     """A repo root holding the committed grid reports plus §7 rows for what isn't produced yet."""
     for rel in ("reports/grid", "reports/collapse_spike"):
         shutil.copytree(REPO / rel, tmp_path / rel)
+    (tmp_path / "reports/risk").mkdir(parents=True)
+    shutil.copy(REPO / "reports/risk/evaluation.json", tmp_path / "reports/risk/evaluation.json")
     runs = {}
     for line in (FIXTURES / "trainlog.jsonl").read_text(encoding="utf-8").splitlines():
         runs.setdefault(json.loads(line)["run_id"], []).append(json.loads(line))
@@ -63,6 +65,7 @@ URLS = {
     "/v1/grids/{dataset}/whitebox": "/v1/grids/wikitext2/whitebox",
     "/v1/features/{dataset}": "/v1/features/wikitext2",
     "/v1/risk": "/v1/risk",
+    "/v1/risk/evaluation": "/v1/risk/evaluation",
     "/v1/repair/{dataset}": "/v1/repair/wikitext2",
     "/v1/runs/{run_id}/trainlog": "/v1/runs/wikitext2_synthetic_r1_s0/trainlog",
     "/v1/bench/samples": "/v1/bench/samples?dataset=wikitext2&type=synthetic&ratio=0.5",
@@ -96,6 +99,13 @@ def test_shapes_the_ui_relies_on(client):
     assert gates[("gate_2", "wikitext2")]["status"] == "passed"
     assert gates[("gate_3", "wikitext2")]["exploratory"] is True
     assert {g["id"] for g in gates.values()} == {"gate_0", "gate_1", "gate_2", "gate_3", "x1", "x2", "x3"}
+    g1 = gates[("gate_1", None)]  # from reports/risk/evaluation.json, one dataset so far
+    assert g1["status"] == "not_evaluable" and g1["source"] == "reports/risk/evaluation.json"
+    assert 0 < g1["details"]["auroc"] < 1 and g1["details"]["coverage_target"] == 0.9
+    assert ">= 2 datasets" in g1["rule"]
+    ev = client.get("/v1/risk/evaluation").json()
+    assert ev["leave_one_type_out"]["auroc"]["value"] == g1["details"]["auroc"]
+    assert ev["baselines"]["ref_lm_loss"]["model_beats_baseline"] is g1["details"]["beats_ref_lm_baseline"]
 
     log = client.get("/v1/runs/wikitext2_synthetic_r1_s0/trainlog").json()
     assert set(log[0]["signals"]) == {"eff_rank_last", "part_ratio_last", "anisotropy_last",
