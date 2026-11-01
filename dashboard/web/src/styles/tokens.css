@@ -10,7 +10,7 @@
   --border: 228 228 231;
   --fg: 24 24 27;
   --muted: 113 113 122;
-  --accent: 42 120 214;
+  --accent: 31 107 191; /* #1f6bbf: 5.1:1 on the background (AA needs 4.5) */
   --ok: 21 128 61;
   --warn: 180 83 9;
   --bad: 185 28 28;
