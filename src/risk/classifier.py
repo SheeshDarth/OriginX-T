@@ -21,20 +21,23 @@ duplicate training rows; they are left out of its test fold.
 
 Writes ``reports/risk/predictions.jsonl`` (§7.4, ``split: "test"``) and
 ``reports/risk/evaluation.json`` (n, AUROC/AUPRC with bootstrap CIs, ECE,
-reliability bins, per fold). Until split conformal (A9) lands, every row carries
-the trivial set ``[0, 1]``: it always covers and promises nothing.
+reliability bins, split-conformal coverage with a bootstrap CI). Each fold holds
+out a third of its training rows to calibrate the conformal sets (``conformal.py``).
 """
 
 from __future__ import annotations
 
 import json
 import math
+import random
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
-from ..evaluation.scoring import auprc, auroc, bootstrap_ci, ece, reliability_bins
+from ..evaluation.scoring import auprc, auroc, bootstrap_ci, ece, reliability_bins, set_coverage
+from . import conformal
 
 MODEL = "logreg@1"
+ALPHA = 0.1
 KEYS = ("dataset", "cell", "type", "ratio", "seed")
 
 
@@ -90,28 +93,66 @@ class LogReg:
     def predict(self, rows: Sequence[Mapping[str, Any]]) -> list[float]:
         return [_sigmoid(sum(wj * xj for wj, xj in zip(self.w, self._x(r))) + self.b) for r in rows]
 
+    def contributions(self, row: Mapping[str, Any]) -> dict[str, float]:
+        """Each feature's push on the log-odds, w_j * standardised x_j (the bias excluded)."""
+        return {c: wj * xj for c, wj, xj in zip(self.cols, self.w, self._x(row))}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"cols": self.cols, "mean": self.mean, "std": self.std, "w": self.w, "b": self.b}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> "LogReg":
+        m = cls()
+        m.cols, m.mean, m.std, m.w, m.b = list(d["cols"]), list(d["mean"]), list(d["std"]), list(d["w"]), d["b"]
+        return m
+
+
+def fit_deployed(rows: Sequence[Mapping[str, Any]], *, alpha: float = ALPHA, cal_fraction: float = 1 / 3,
+                 **fit: Any) -> dict[str, Any]:
+    """The model the audit uses: fitted on all labelled cells but a calibration share, which sets q.
+
+    ``q`` is ``None`` when the calibration set is too small for ``alpha`` (q = infinity: every set is {0, 1}).
+    """
+    rows = list(rows)
+    random.Random("cal-deployed").shuffle(rows)
+    n_cal = round(len(rows) * cal_fraction)
+    cal, train = rows[:n_cal], rows[n_cal:]
+    model = LogReg(**fit).fit(train, [r["label"] for r in train], feature_columns(rows))
+    q = conformal.quantile([conformal.nonconformity(p, r["label"]) for r, p in zip(cal, model.predict(cal))], alpha)
+    return {"model": MODEL, **model.to_dict(), "alpha": alpha, "q": None if math.isinf(q) else q,
+            "n_train": len(train), "n_cal": len(cal)}
+
 
 def feature_columns(rows: Sequence[Mapping[str, Any]]) -> list[str]:
     """Every f_* column with at least one value."""
     return sorted({k for r in rows for k, v in r.items() if k.startswith("f_") and v is not None})
 
 
-def leave_one_out(rows: Sequence[Mapping[str, Any]], group: str, **fit: Any) -> list[dict[str, Any]]:
+def leave_one_out(
+    rows: Sequence[Mapping[str, Any]], group: str, *, alpha: float = ALPHA, cal_fraction: float = 1 / 3, **fit: Any
+) -> list[dict[str, Any]]:
     """Out-of-group predictions: for each value of ``group``, train on the rest and predict it.
 
-    ``rows`` are feature rows carrying a ``label``. A fold whose training side lacks
-    a class is skipped (nothing honest to fit).
+    The rest is shuffled (seeded per fold) and split: ``cal_fraction`` calibrates the
+    split-conformal threshold (``conformal.py``), the remainder fits the model, so
+    the calibration scores come from data the model never saw. ``rows`` are feature
+    rows carrying a ``label``. A fold whose fitting part lacks a class is skipped.
     """
     cols = feature_columns(rows)
     preds = []
     for g in sorted({r[group] for r in rows}):
-        train = [r for r in rows if r[group] != g]
+        rest = [r for r in rows if r[group] != g]
+        random.Random(f"cal-{group}-{g}").shuffle(rest)
+        n_cal = round(len(rest) * cal_fraction)
+        cal, train = rest[:n_cal], rest[n_cal:]
         test = [r for r in rows if r[group] == g and not (group == "type" and r["ratio"] == 0)]
         if not test or len({r["label"] for r in train}) < 2:
             continue
         model = LogReg(**fit).fit(train, [r["label"] for r in train], cols)
+        q = conformal.quantile([conformal.nonconformity(p, r["label"]) for r, p in zip(cal, model.predict(cal))], alpha)
         for r, p in zip(test, model.predict(test)):
-            preds.append({**{k: r[k] for k in KEYS}, "label": r["label"], "p_degrade": p, "fold": f"{group}={g}"})
+            preds.append({**{k: r[k] for k in KEYS}, "label": r["label"], "p_degrade": p, "fold": f"{group}={g}",
+                          "conformal_set": conformal.prediction_set(p, q), "alpha": alpha, "n_cal": len(cal)})
     return preds
 
 
@@ -128,13 +169,20 @@ def evaluate(preds: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     if y:
         out["ece"] = ece(y, ps)
         out["reliability"] = reliability_bins(y, ps)
+        sets = [p["conformal_set"] for p in preds]
+        cov, lo, hi = bootstrap_ci(lambda t, s: set_coverage(t, s)["coverage"], y, sets)
+        out["conformal"] = {"alpha": preds[0]["alpha"], "target": 1 - preds[0]["alpha"],
+                            "coverage": {"value": cov, "ci95": [lo, hi]},
+                            "mean_set_size": set_coverage(y, sets)["mean_size"],
+                            "n_cal_per_fold": sorted({p["n_cal"] for p in preds})}
     return out
 
 
 def risk_rows(preds: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """§7.4 rows; conformal_set is the trivial [0, 1] until A9."""
+    """§7.4 rows."""
     return [{"schema": "risk/1", "dataset": p["dataset"], "cell": p["cell"], "p_degrade": p["p_degrade"],
-             "label": p["label"], "conformal_set": [0, 1], "alpha": 0.1, "model": MODEL, "split": "test"}
+             "label": p["label"], "conformal_set": p["conformal_set"], "alpha": p["alpha"], "model": MODEL,
+             "split": "test"}
             for p in preds]
 
 
@@ -164,15 +212,20 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("--out-dir", default="reports/risk")
     args = p.parse_args(argv)
     rows = [r for d in args.datasets for r in load_rows(d, Path(args.features_dir), Path(grids[d]))]
+    from .baselines import baseline_report, gate_1
+
     preds = leave_one_out(rows, "type")
     report: dict[str, Any] = {"model": MODEL, "label": "D4 default (HANDBOOK §13)", "features": feature_columns(rows),
-                              "leave_one_type_out": evaluate(preds)}
+                              "leave_one_type_out": evaluate(preds), "baselines": baseline_report(rows, preds)}
+    report["gate_1"] = gate_1([r["dataset"] for r in rows], bool(report["baselines"]["single_feature_auroc"]))
     if len(args.datasets) > 1:
         lodo = leave_one_out(rows, "dataset")
         report["leave_one_dataset_out"] = evaluate(lodo)
         preds += lodo
     out = Path(args.out_dir)
     _write_jsonl(out / "predictions.jsonl", risk_rows(preds))
+    deployed = {**fit_deployed(rows), "feature_version": sorted({r["feature_version"] for r in rows})}
+    (out / "model.json").write_text(json.dumps(deployed, indent=2) + "\n", encoding="utf-8", newline="\n")
     (out / "evaluation.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8", newline="\n")
     lt = report["leave_one_type_out"]
     print(f"leave-one-type-out: n={lt['n']} ({lt['n_degraded']} degraded), "
