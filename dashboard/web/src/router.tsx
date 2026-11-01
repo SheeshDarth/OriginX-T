@@ -11,6 +11,7 @@ import { Audit } from "./routes/Audit";
 import { CellDetail } from "./routes/CellDetail";
 import { Curves } from "./routes/Curves";
 import { Overview } from "./routes/Overview";
+import { Repair } from "./routes/Repair";
 
 const COMMANDS: Command[] = [
   { label: "Overview", to: "/" },
@@ -51,6 +52,9 @@ const root = createRootRoute({
           <Link to="/audit" className="text-muted [&.active]:text-fg">
             Audit
           </Link>
+          <Link to="/repair" className="text-muted [&.active]:text-fg">
+            Repair
+          </Link>
         </nav>
         <kbd className="ml-auto font-mono text-xs text-muted">Ctrl K</kbd>
       </header>
@@ -65,6 +69,11 @@ const root = createRootRoute({
 export const routeTree = root.addChildren([
   createRoute({ getParentRoute: () => root, path: "/", component: Overview }),
   createRoute({ getParentRoute: () => root, path: "/audit", component: Audit }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/repair",
+    component: Repair,
+  }),
   createRoute({
     getParentRoute: () => root,
     path: "/curves",
