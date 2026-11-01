@@ -4,6 +4,48 @@
  */
 
 export interface paths {
+  "/v1/audits": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Audit
+     * @description Start an audit of the uploaded dataset. Poll ``GET /v1/audits/{id}`` for the report.
+     *
+     *     ``benchmark`` also checks every sample for near-copies of that grid's benchmark items.
+     */
+    post: operations["create_audit_v1_audits_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/audits/{audit_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Audit
+     * @description An audit's status; ``report`` and ``scores`` once it is ``done``.
+     */
+    get: operations["get_audit_v1_audits__audit_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/bench/samples": {
     parameters: {
       query?: never;
@@ -161,6 +203,64 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** AuditJob */
+    AuditJob: {
+      /** Benchmark */
+      benchmark?: ("wikitext2" | "tinystories") | null;
+      /** Created At */
+      created_at: string;
+      /** Error */
+      error?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
+      /** Id */
+      id: string;
+      /** N Samples */
+      n_samples: number;
+      /** Name */
+      name?: string | null;
+      report?: components["schemas"]["AuditReport"] | null;
+      /** Scores */
+      scores?: components["schemas"]["SampleScore"][] | null;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "queued" | "running" | "done" | "failed";
+    };
+    /**
+     * AuditReport
+     * @description The ``audit/1`` report of ``src.risk.audit`` (what the Audit screen renders).
+     */
+    AuditReport: {
+      /** Alpha */
+      alpha: number;
+      /** Conformal Set */
+      conformal_set: number[];
+      /** Contributions */
+      contributions: components["schemas"]["Contribution"][];
+      /** Features */
+      features: {
+        [key: string]: number | null;
+      };
+      /** Flagged */
+      flagged: components["schemas"]["FlaggedSample"][];
+      /** Missing Features */
+      missing_features: string[];
+      /** Model */
+      model: string;
+      /** N Flagged */
+      n_flagged: number;
+      /** N Samples */
+      n_samples: number;
+      /** P Degrade */
+      p_degrade: number;
+      /**
+       * Schema
+       * @constant
+       */
+      schema: "audit/1";
+    };
     /** BenchSample */
     BenchSample: {
       /** Benchmark Near Score */
@@ -179,6 +279,15 @@ export interface components {
       source: string;
       /** Split */
       split: string;
+    };
+    /** Contribution */
+    Contribution: {
+      /** Contribution */
+      contribution: number;
+      /** Feature */
+      feature: string;
+      /** Value */
+      value: number | null;
     };
     /**
      * Curve
@@ -230,6 +339,21 @@ export interface components {
       seed: number;
       /** Type */
       type: string;
+    };
+    /** FlaggedSample */
+    FlaggedSample: {
+      /** Benchmark Similarity */
+      benchmark_similarity: number | null;
+      /** Index */
+      index: number;
+      /** Reasons */
+      reasons: string[];
+      /** Repeat 3Gram */
+      repeat_3gram: number | null;
+      /** Sample Id */
+      sample_id: string;
+      /** Text */
+      text: string;
     };
     /** Gate */
     Gate: {
@@ -370,6 +494,27 @@ export interface components {
       split: "train" | "cal" | "test";
     };
     /**
+     * SampleScore
+     * @description A per-sample risk score (§7.3, without ``true_source``, which an upload does not have).
+     */
+    SampleScore: {
+      /**
+       * Higher Is
+       * @default worse
+       * @constant
+       */
+      higher_is: "worse";
+      /**
+       * Method
+       * @enum {string}
+       */
+      method: "risk_reflm" | "risk_knn";
+      /** Sample Id */
+      sample_id: string;
+      /** Score */
+      score: number | null;
+    };
+    /**
      * TrainlogRow
      * @description §7.6, with the ``sig_`` columns gathered into ``signals`` (prefix dropped).
      */
@@ -427,6 +572,116 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  create_audit_v1_audits_post: {
+    parameters: {
+      query?: {
+        benchmark?: ("wikitext2" | "tinystories") | null;
+        name?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description The dataset: one JSON object per line (prompt/response, text, ... as the loaders accept), UTF-8. */
+    requestBody: {
+      content: {
+        "application/x-ndjson": string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuditJob"];
+        };
+      };
+      /** @description Not found, or not produced yet */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+      /** @description Upload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+      /** @description Invalid request parameters */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+      /** @description No deployed risk model, or the benchmark data is not on this server */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+    };
+  };
+  get_audit_v1_audits__audit_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        audit_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuditJob"];
+        };
+      };
+      /** @description Not found, or not produced yet */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+      /** @description Invalid request parameters */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+    };
+  };
   bench_samples_v1_bench_samples_get: {
     parameters: {
       query: {

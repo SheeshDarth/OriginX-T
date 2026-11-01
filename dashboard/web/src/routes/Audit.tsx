@@ -1,32 +1,12 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrap } from "../api/client";
+import type { components } from "../api/schema";
 import { conformalSentence, pct, verdict } from "../components/RiskPanel";
 
-/** The audit/1 report written by `python -m src.risk.audit` (src/risk/audit.py).
- *  Hand-typed because it is not an API response yet; switch to the generated type when
- *  POST /v1/audits lands in openapi.json. */
-export type AuditReport = {
-  schema: "audit/1";
-  n_samples: number;
-  model: string;
-  p_degrade: number;
-  conformal_set: number[];
-  alpha: number;
-  missing_features: string[];
-  contributions: {
-    feature: string;
-    value: number | null;
-    contribution: number;
-  }[];
-  n_flagged: number;
-  flagged: {
-    index: number;
-    sample_id: string;
-    text: string;
-    benchmark_similarity: number | null;
-    repeat_3gram: number | null;
-    reasons: string[];
-  }[];
-};
+/** The audit/1 report (src/risk/audit.py), as GET /v1/audits/{id} returns it once done. */
+export type AuditReport = components["schemas"]["AuditReport"];
+type AuditJob = components["schemas"]["AuditJob"];
 
 export function parseReport(text: string): AuditReport {
   const r = JSON.parse(text);
@@ -71,6 +51,13 @@ function download(name: string, body: string, type: string) {
 
 const fmt = (v: number | null, d = 3) => (v == null ? "—" : v.toFixed(d));
 
+/** The risk model learned from 1000-sample grid datasets, and lexical features such as
+ *  type-token ratio depend on dataset size, so a score far from that size is out of distribution. */
+export function sizeWarning(n: number): string | null {
+  if (n >= 500 && n <= 2000) return null;
+  return `This dataset has ${n} samples; the risk model learned from 1000-sample datasets and some features (type-token ratio, distinct n-grams) change with size, so treat the score as unreliable. The flagged samples below do not depend on size.`;
+}
+
 function Report({ r }: { r: AuditReport }) {
   const v = verdict(r.conformal_set);
   const maxAbs = Math.max(
@@ -94,6 +81,9 @@ function Report({ r }: { r: AuditReport }) {
           {r.n_samples} samples · model{" "}
           <span className="font-mono">{r.model}</span>
         </span>
+        {sizeWarning(r.n_samples) && (
+          <p className="w-full text-xs text-warn">{sizeWarning(r.n_samples)}</p>
+        )}
       </div>
 
       <section>
@@ -210,51 +200,136 @@ function Report({ r }: { r: AuditReport }) {
   );
 }
 
+/** The upload's name as the API accepts it (letters, digits, space, dot, dash, underscore). */
+export const safeName = (name: string) =>
+  name.replace(/[^\w .-]/g, "_").slice(0, 120) || "upload";
+
+const finished = (job: AuditJob | null | undefined) =>
+  job?.status === "done" || job?.status === "failed";
+
 export function Audit() {
-  const [report, setReport] = useState<AuditReport | null>(null);
+  const [opened, setOpened] = useState<AuditReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [leakCheck, setLeakCheck] = useState(true);
+
+  const job = useQuery({
+    queryKey: ["audit", jobId],
+    enabled: jobId !== null,
+    queryFn: () =>
+      unwrap(
+        api.GET("/v1/audits/{audit_id}", {
+          params: { path: { audit_id: jobId! } },
+        }),
+      ),
+    refetchInterval: (q) => (finished(q.state.data) ? false : 1000),
+  });
+
+  async function upload(file: File | undefined) {
+    if (!file) return;
+    setOpened(null);
+    setError(null);
+    setJobId(null);
+    const {
+      data,
+      error: problem,
+      response,
+    } = await api.POST("/v1/audits", {
+      params: {
+        query: {
+          name: safeName(file.name),
+          benchmark: leakCheck ? "wikitext2" : undefined,
+        },
+      },
+      body: await file.text(),
+      bodySerializer: (body) => body as string,
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+    if (data) setJobId(data.id);
+    else
+      setError(
+        `${file.name}: ${(problem as { detail?: string })?.detail ?? `HTTP ${response.status}`}`,
+      );
+  }
 
   async function open(file: File | undefined) {
     if (!file) return;
+    setJobId(null);
     try {
-      setReport(parseReport(await file.text()));
+      setOpened(parseReport(await file.text()));
       setError(null);
     } catch (e) {
-      setReport(null);
+      setOpened(null);
       setError(`${file.name}: ${(e as Error).message}`);
     }
   }
 
+  const j = job.data;
+  const report = j?.report ?? opened;
   return (
     <section aria-labelledby="audit-title">
       <h1 id="audit-title" className="text-lg font-semibold">
         Audit a dataset
       </h1>
       <p className="mb-4 text-sm text-muted">
-        Will fine-tuning on this dataset damage the model? Run{" "}
-        <code className="font-mono">
-          python -m src.risk.audit data.jsonl --out audit.json
-        </code>
-        , then open the report here.
+        Will fine-tuning on this dataset damage the model? Upload it as JSONL
+        (one record per line; prompt/response or text, up to 20 MB).
       </p>
-      <label className="mb-6 inline-block text-sm">
-        Audit report{" "}
-        <input
-          type="file"
-          accept=".json,application/json"
-          onChange={(e) => open(e.target.files?.[0])}
-          className="ml-2 text-sm"
-        />
-      </label>
+      <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        <label>
+          Dataset to audit{" "}
+          <input
+            type="file"
+            accept=".jsonl,.json,application/x-ndjson"
+            onChange={(e) => upload(e.target.files?.[0])}
+            className="ml-2 text-sm"
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={leakCheck}
+            onChange={(e) => setLeakCheck(e.target.checked)}
+          />
+          Check for copies of the WikiText benchmark items
+        </label>
+        <label className="text-muted">
+          or open a saved report{" "}
+          <input
+            type="file"
+            accept=".json,application/json"
+            onChange={(e) => open(e.target.files?.[0])}
+            className="ml-2 text-sm"
+          />
+        </label>
+      </div>
       {error && (
         <p role="alert" className="mb-4 text-sm text-bad">
           {error}
         </p>
       )}
+      {job.isError && (
+        <p role="alert" className="mb-4 text-sm text-bad">
+          Lost track of the audit ({job.error.message}). The server keeps jobs
+          only until it restarts.
+        </p>
+      )}
+      {j && !finished(j) && (
+        <p role="status" className="mb-4 text-sm text-muted">
+          Auditing {j.n_samples} samples of {j.name} ({j.status}). About 3
+          minutes per 1000 samples on a GPU.
+        </p>
+      )}
+      {j?.status === "failed" && (
+        <p role="alert" className="mb-4 text-sm text-bad">
+          The audit failed: {j.error}
+        </p>
+      )}
       {report ? (
         <Report r={report} />
       ) : (
-        !error && <p className="text-sm text-muted">No report open.</p>
+        !error &&
+        !j && <p className="text-sm text-muted">No dataset audited yet.</p>
       )}
     </section>
   );
