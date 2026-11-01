@@ -756,6 +756,18 @@ rate ≤ 5%. Fill in exact numbers at CP0, then **don't change them**.
 9. **Stale `.pyc` after mutation testing** can fake failures: `python -B`, `-p no:cacheprovider`.
 10. **Base DistilGPT-2 can't follow a rewrite instruction**, so "paraphrased" is closer to
     prompted continuation. Say so in the paper, or use an instruct model for X2-scale runs.
+11. **Windows checkouts get CRLF** (`core.autocrlf`), and CI (Linux) never sees it. Don't assert
+    on raw bytes like `b"\r"`. Prettier needs `"endOfLine": "auto"` (`dashboard/web/.prettierrc`).
+    Write generated files with `newline="\n"`, not a shell `>` redirect (`openapi.json`).
+12. **Stacked PRs merge into their parent branch, not `main`.** Retarget the next PR to `main`
+    (`gh pr edit <n> --base main`) as soon as its base merges (#88–#90 had to bring stacks over).
+13. **Switching to a branch without `dashboard/web` under a running `pnpm dev` breaks the
+    styling** (Vite loses the Tailwind config). Restart `pnpm dev`. Demo from one branch.
+14. **Fixed-step gradient descent can stop short.** The risk model's 2000 steps left it short
+    of its optimum (AUROC 0.81 instead of 0.84). It now stops on a gradient tolerance, and
+    `src/risk/crosscheck.py` checks it against scikit-learn.
+15. **Size-dependent features**: type-token ratio and distinct-n change with dataset size. The
+    risk model learned from 1000-sample sets, so audit datasets of a similar size.
 
 ---
 

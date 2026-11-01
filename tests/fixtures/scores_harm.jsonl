@@ -1,0 +1,12 @@
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0000113", "method": "harm_lora_grad", "score": 0.0213, "higher_is": "worse", "true_source": "human"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0004477", "method": "harm_lora_grad", "score": -0.0047, "higher_is": "worse", "true_source": "human"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0004409", "method": "harm_lora_grad", "score": 0.0008, "higher_is": "worse", "true_source": "human"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0013323-g1", "method": "harm_lora_grad", "score": 0.0861, "higher_is": "worse", "true_source": "synthetic"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0008228-g1", "method": "harm_lora_grad", "score": 0.0532, "higher_is": "worse", "true_source": "synthetic"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0036095-g1", "method": "harm_lora_grad", "score": 0.0419, "higher_is": "worse", "true_source": "synthetic"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0000113", "method": "harm_repr_sim", "score": 0.412, "higher_is": "worse", "true_source": "human"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0004477", "method": "harm_repr_sim", "score": 0.287, "higher_is": "worse", "true_source": "human"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0004409", "method": "harm_repr_sim", "score": 0.355, "higher_is": "worse", "true_source": "human"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0013323-g1", "method": "harm_repr_sim", "score": 0.734, "higher_is": "worse", "true_source": "synthetic"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0008228-g1", "method": "harm_repr_sim", "score": 0.689, "higher_is": "worse", "true_source": "synthetic"}
+{"schema": "scores/1", "dataset": "wikitext2", "cell": "synthetic_r0.5_s0", "sample_id": "wikitext2_train-0036095-g1", "method": "harm_repr_sim", "score": 0.597, "higher_is": "worse", "true_source": "synthetic"}
