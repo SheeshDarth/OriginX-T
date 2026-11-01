@@ -8,7 +8,8 @@
     "typecheck": "tsc -b",
     "lint": "eslint . && prettier --check src",
     "test": "vitest run",
-    "gen:api": "openapi-typescript ../api/openapi.json -o src/api/schema.d.ts"
+    "gen:api": "openapi-typescript ../api/openapi.json -o src/api/schema.d.ts",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@observablehq/plot": "0.6",
@@ -19,7 +20,9 @@
     "react-dom": "18"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4",
     "@eslint/js": "9",
+    "@playwright/test": "1",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "16",
     "@types/react": "18",
