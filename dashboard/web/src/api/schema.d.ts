@@ -182,6 +182,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/risk/evaluation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Risk Evaluation
+     * @description The risk model's held-out AUROC/AUPRC/ECE, conformal coverage, baselines and GATE 1.
+     */
+    get: operations["risk_evaluation_v1_risk_evaluation_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/runs/{run_id}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Trainlog Stream
+     * @description The run's trainlog as it is written (X3 live monitor).
+     */
+    get: operations["trainlog_stream_v1_runs__run_id__stream_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/runs/{run_id}/trainlog": {
     parameters: {
       query?: never;
@@ -261,6 +301,20 @@ export interface components {
        */
       schema: "audit/1";
     };
+    /** BaselineComparison */
+    BaselineComparison: {
+      /** Auroc Baseline */
+      auroc_baseline: number;
+      /** Auroc Model */
+      auroc_model: number;
+      /** Column */
+      column: string;
+      difference: components["schemas"]["Estimate"];
+      /** Model Beats Baseline */
+      model_beats_baseline: boolean;
+      /** N */
+      n: number;
+    };
     /** BenchSample */
     BenchSample: {
       /** Benchmark Near Score */
@@ -279,6 +333,21 @@ export interface components {
       source: string;
       /** Split */
       split: string;
+    };
+    /** ConformalCoverage */
+    ConformalCoverage: {
+      /** Alpha */
+      alpha: number;
+      coverage: components["schemas"]["Estimate"];
+      /** Mean Set Size */
+      mean_set_size: number;
+      /**
+       * N Cal Per Fold
+       * @default []
+       */
+      n_cal_per_fold: number[];
+      /** Target */
+      target: number;
     };
     /** Contribution */
     Contribution: {
@@ -312,6 +381,13 @@ export interface components {
       ratio: number;
       /** Type */
       type: string;
+    };
+    /** Estimate */
+    Estimate: {
+      /** Ci95 */
+      ci95?: number[] | null;
+      /** Value */
+      value?: number | null;
     };
     /**
      * FeatureRow
@@ -385,6 +461,18 @@ export interface components {
        */
       status: "passed" | "failed" | "not_evaluable" | "pending";
     };
+    /** Gate1 */
+    Gate1: {
+      /** Datasets */
+      datasets: string[];
+      /** Rule */
+      rule: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "passed" | "failed" | "not_evaluable";
+    };
     /**
      * GridResult
      * @description One grid cell's outcome (§7.1).
@@ -438,6 +526,19 @@ export interface components {
        */
       type: string;
     };
+    /** ReliabilityBin */
+    ReliabilityBin: {
+      /** Accuracy */
+      accuracy: number;
+      /** Confidence */
+      confidence: number;
+      /** Hi */
+      hi: number;
+      /** Lo */
+      lo: number;
+      /** N */
+      n: number;
+    };
     /**
      * RepairResult
      * @description §7.5. ``recovery`` = (ppl_contaminated - ppl_repaired) / (ppl_contaminated - ppl_clean).
@@ -464,6 +565,33 @@ export interface components {
       seed: number;
       /** Strategy */
       strategy: string;
+    };
+    /** RiskBaselines */
+    RiskBaselines: {
+      ref_lm_loss?: components["schemas"]["BaselineComparison"] | null;
+      /**
+       * Single Feature Auroc
+       * @default {}
+       */
+      single_feature_auroc: {
+        [key: string]: number | null;
+      };
+    };
+    /**
+     * RiskEvaluation
+     * @description ``reports/risk/evaluation.json`` (``python -m src.risk.classifier``): GATE 1's numbers.
+     */
+    RiskEvaluation: {
+      baselines: components["schemas"]["RiskBaselines"];
+      /** Features */
+      features: string[];
+      gate_1: components["schemas"]["Gate1"];
+      /** Label */
+      label: string;
+      leave_one_dataset_out?: components["schemas"]["RiskScores"] | null;
+      leave_one_type_out: components["schemas"]["RiskScores"];
+      /** Model */
+      model: string;
     };
     /**
      * RiskPrediction
@@ -492,6 +620,26 @@ export interface components {
        * @enum {string}
        */
       split: "train" | "cal" | "test";
+    };
+    /**
+     * RiskScores
+     * @description How the risk model scores on held-out groups (``src.risk.classifier.evaluate``).
+     */
+    RiskScores: {
+      auprc?: components["schemas"]["Estimate"] | null;
+      auroc?: components["schemas"]["Estimate"] | null;
+      conformal?: components["schemas"]["ConformalCoverage"] | null;
+      /** Ece */
+      ece?: number | null;
+      /** N */
+      n: number;
+      /** N Degraded */
+      n_degraded: number;
+      /**
+       * Reliability
+       * @default []
+       */
+      reliability: components["schemas"]["ReliabilityBin"][];
     };
     /**
      * SampleScore
@@ -999,6 +1147,88 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RiskPrediction"][];
+        };
+      };
+      /** @description Not found, or not produced yet */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+      /** @description Invalid request parameters */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+    };
+  };
+  risk_evaluation_v1_risk_evaluation_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RiskEvaluation"];
+        };
+      };
+      /** @description Not found, or not produced yet */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+      /** @description Invalid request parameters */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+    };
+  };
+  trainlog_stream_v1_runs__run_id__stream_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Server-Sent Events: `event: row` (`id` = step, `data` = one TrainlogRow as JSON) for every logged row, existing ones first, then live; `event: reset` if a new run restarts the log; `event: end` once the log has been quiet for a while (a finished run ends right after its replay). Send `Last-Event-ID` to resume after a step. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
         };
       };
       /** @description Not found, or not produced yet */
