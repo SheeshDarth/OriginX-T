@@ -9,7 +9,9 @@ threshold. Ratio-0 cells are 0 by definition.
 
 **Model.** Logistic regression, hand-rolled: features standardised with the
 training fold's mean and std, then full-batch gradient descent on the mean log
-loss plus an L2 penalty (bias not penalised). Missing values (``None``) become the
+loss plus an L2 penalty (bias not penalised), run until every gradient component is
+below ``tol`` (the loss is convex, so that is its unique optimum; ``crosscheck.py``
+confirms scikit-learn reaches the same predictions). Missing values (``None``) become the
 training mean (0 after standardising). Standard library only.
 
 **Evaluation (the headline, §8.3).** Damage rises with ratio by construction, so a
@@ -64,8 +66,8 @@ def _sigmoid(z: float) -> float:
 
 
 class LogReg:
-    def __init__(self, lr: float = 0.1, steps: int = 2000, l2: float = 0.01) -> None:
-        self.lr, self.steps, self.l2 = lr, steps, l2
+    def __init__(self, lr: float = 0.1, steps: int = 100_000, l2: float = 0.01, tol: float = 1e-6) -> None:
+        self.lr, self.steps, self.l2, self.tol = lr, steps, l2, tol
 
     def _x(self, row: Mapping[str, Any]) -> list[float]:
         return [0.0 if row.get(c) is None else (row[c] - m) / s for c, m, s in zip(self.cols, self.mean, self.std)]
@@ -82,12 +84,15 @@ class LogReg:
         X = [self._x(r) for r in rows]
         n, d = len(X), len(self.cols)
         self.w, self.b = [0.0] * d, 0.0
-        for _ in range(self.steps):
+        for _ in range(self.steps):  # until the gradient vanishes; steps is only a safety cap
             err = [_sigmoid(sum(wj * xj for wj, xj in zip(self.w, x)) + self.b) - yi for x, yi in zip(X, y)]
             # gradient of mean log loss + (l2/2)|w|^2
-            for j in range(d):
-                self.w[j] -= self.lr * (sum(e * x[j] for e, x in zip(err, X)) / n + self.l2 * self.w[j])
-            self.b -= self.lr * sum(err) / n
+            grad = [sum(e * x[j] for e, x in zip(err, X)) / n + self.l2 * self.w[j] for j in range(d)]
+            grad_b = sum(err) / n
+            if max(map(abs, [*grad, grad_b])) < self.tol:
+                break
+            self.w = [wj - self.lr * g for wj, g in zip(self.w, grad)]
+            self.b -= self.lr * grad_b
         return self
 
     def predict(self, rows: Sequence[Mapping[str, Any]]) -> list[float]:
@@ -129,7 +134,8 @@ def feature_columns(rows: Sequence[Mapping[str, Any]]) -> list[str]:
 
 
 def leave_one_out(
-    rows: Sequence[Mapping[str, Any]], group: str, *, alpha: float = ALPHA, cal_fraction: float = 1 / 3, **fit: Any
+    rows: Sequence[Mapping[str, Any]], group: str, *, alpha: float = ALPHA, cal_fraction: float = 1 / 3,
+    model_cls: type = None, **fit: Any
 ) -> list[dict[str, Any]]:
     """Out-of-group predictions: for each value of ``group``, train on the rest and predict it.
 
@@ -148,7 +154,7 @@ def leave_one_out(
         test = [r for r in rows if r[group] == g and not (group == "type" and r["ratio"] == 0)]
         if not test or len({r["label"] for r in train}) < 2:
             continue
-        model = LogReg(**fit).fit(train, [r["label"] for r in train], cols)
+        model = (model_cls or LogReg)(**fit).fit(train, [r["label"] for r in train], cols)
         q = conformal.quantile([conformal.nonconformity(p, r["label"]) for r, p in zip(cal, model.predict(cal))], alpha)
         for r, p in zip(test, model.predict(test)):
             preds.append({**{k: r[k] for k in KEYS}, "label": r["label"], "p_degrade": p, "fold": f"{group}={g}",
