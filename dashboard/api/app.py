@@ -333,12 +333,13 @@ def _with_prefix(row: dict[str, Any], prefix: str) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- audit jobs
 
-# (samples, deployed model, benchmark texts) -> (audit/1 report, per-sample score rows)
-Runner = Callable[[list[Sample], Mapping[str, Any], list[str]], tuple[dict[str, Any], list[dict[str, Any]]]]
+# (samples, deployed model, benchmark texts, reference texts) -> (audit/1 report, per-sample score rows)
+Runner = Callable[[list[Sample], Mapping[str, Any], list[str], list[str]],
+                  tuple[dict[str, Any], list[dict[str, Any]]]]
 
 
-def run_audit(samples: list[Sample], deployed: Mapping[str, Any],
-              bench: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def run_audit(samples: list[Sample], deployed: Mapping[str, Any], bench: list[str],
+              reference: list[str] = ()) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The audit/1 report (``src.risk.audit``) and the two per-sample risk scores (§7.3)."""
     from src.features import model as reflm
     from src.features import semantic
@@ -347,7 +348,7 @@ def run_audit(samples: list[Sample], deployed: Mapping[str, Any],
     from src.risk.audit import audit
 
     texts, ids = [training_text(s) for s in samples], [s.sample_id for s in samples]
-    report = audit(texts, ids, deployed, bench)
+    report = audit(texts, ids, deployed, bench, reference)
     ctx = {"device": _device("auto")}
     scores: list[dict[str, Any]] = []
     for method, per_text, value in (
@@ -496,10 +497,11 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
         with lock:
             jobs[job_id] = {**jobs[job_id], **fields}
 
-    def work(job_id: str, samples: list[Sample], deployed: Mapping[str, Any], bench: list[str]) -> None:
+    def work(job_id: str, samples: list[Sample], deployed: Mapping[str, Any], bench: list[str],
+             reference: list[str]) -> None:
         update(job_id, status="running")
         try:
-            report, scores = run(samples, deployed, bench)
+            report, scores = run(samples, deployed, bench, reference)
             update(job_id, status="done", report=report, scores=scores, finished_at=_now())
         except Exception as e:  # the client sees it as the job's error
             update(job_id, status="failed", error=f"{type(e).__name__}: {e}"[:500], finished_at=_now())
@@ -534,11 +536,13 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
                                      "run python -m src.risk.classifier")
         deployed = json.loads(model_file.read_text(encoding="utf-8"))
         bench: list[str] = []
+        reference: list[str] = []  # the sem family's reference comes with the grid's data
         if benchmark:
-            from src.risk.audit import grid_benchmark
+            from src.risk.audit import grid_benchmark, grid_reference
 
             try:
                 bench = grid_benchmark(reports.path(GRID_CONFIGS[benchmark]))
+                reference = grid_reference(reports.path(GRID_CONFIGS[benchmark]))
             except (OSError, KeyError) as e:
                 raise HTTPException(503, f"the {benchmark} benchmark data is not on this server "
                                          f"({type(e).__name__})") from None
@@ -547,7 +551,7 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
                "benchmark": benchmark, "created_at": _now()}
         with lock:
             jobs[job_id] = job
-        worker.submit(work, job_id, samples, deployed, bench)
+        worker.submit(work, job_id, samples, deployed, bench, reference)
         response.headers["Location"] = f"/v1/audits/{job_id}"
         return job
 
