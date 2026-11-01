@@ -603,10 +603,17 @@ alarm and the canary.
       texts, weight signals from the effective (frozen + LoRA) weights on the GPU, ~3 s per
       row; logging is bit-for-bit neutral (tested). `GET /v1/runs/{id}/stream` tails the file
       as SSE (`row` / `reset` / `end`, `Last-Event-ID` resumes).
-- [ ] Monitors are **two-sided** (signals can move either way; anisotropy *falls* in our data).
-- [ ] Calibrate the alarm threshold on healthy (`human_control` / ratio-0) runs with split
+- [x] Monitors are **two-sided** (signals can move either way; anisotropy *falls* in our data).
+- [x] Calibrate the alarm threshold on healthy (`human_control` / ratio-0) runs with split
       conformal, and report the false-alarm rate on held-out healthy seeds. Optionally use the
       dataset risk from Track A as a prior (tighter monitoring for risky data).
+      Built (#37): `src/evaluation/alarm.py`. Healthy band per signal and step (median and sd
+      of the change since step 0), a run's score = its largest two-sided deviation over all
+      signals and steps (one max, no Bonferroni), split-conformal threshold on separate
+      healthy runs (needs ≥ 19 for 5%), latching live alarm via `TrainLogger(monitor=...)`.
+      A *breach* is the same machinery on the holdout loss, one-sided, because the loss never
+      rises within a run here: damage is a gap from healthy runs. Not done: the dataset-risk
+      prior. **The verdict waits for CP0** to confirm `configs/x3.yaml`.
 - [x] Re-run a subset of the grid with logging on, so curves over *training steps* exist.
       `python -m src.evaluation.live --preset x3`: all five types at ratio 1 + the clean
       baseline, 3 seeds (18 runs, grid seeds) → `reports/trainlogs/wikitext2_<cell>.jsonl`.
@@ -670,7 +677,7 @@ Full research, prior art and sources: `docs/STRETCH_GOALS.md`. Summary:
 | Owner | Siddharth (Track B) | Vishnu (Track C), runs on Siddharth's GPU | Vishnu (Track C); risk prior from Revanth |
 | Closest prior art | Influence functions are fragile on LLMs; repr-similarity beats them (arXiv 2409.19998) | Proxies rank *useful* data for pretraining (2512.24503, 2509.21013) | "When Rank Rises as LLMs Degrade" (2610.09647): CUSUM rank monitors, union-bound FA |
 | What's new for us | Ground-truth testbed + measured recovery on dose-response curves | Forecasting *harm*, calibrated, across scale | Conformal false-alarm guarantee; recursive-synthetic collapse; dataset-risk prior |
-| **Gate (PROPOSED: confirm at CP0)** | Harm-guided recovers ≥ 10 pp more than random at ratio 0.5 on ≥ 2 of 3 collapse types, every seed | Spearman ρ ≥ 0.7 proxy vs target damage, bootstrap CI excludes 0 | At FA 5%: alarm before the held-out-loss breach on ≥ 50% of collapsing runs; observed FA ≤ 10% on held-out healthy runs |
+| **Gate (PROPOSED: confirm at CP0)** | Harm-guided recovers ≥ 10 pp more than random at ratio 0.5 on ≥ 2 of 3 collapse types, every seed | Spearman ρ ≥ 0.7 proxy vs target damage, bootstrap CI excludes 0 | At FA 5%: alarm before the held-out-loss breach on ≥ 50% of collapsing runs; observed FA ≤ 10% on held-out healthy runs. Exact rule, run sets and the "breach" definition: `configs/x3.yaml` (`confirmed: false` until CP0) |
 | Cut-off | Pilot beats random by 2026-12-15, else report as negative | Target trainable by 2026-12-15, else drop | 2027-01-15 (ship callback even without guarantee) |
 
 **The committed core ships first.** If time runs short, a stretch goal is cut, never the
