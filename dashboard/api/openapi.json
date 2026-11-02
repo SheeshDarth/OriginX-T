@@ -364,6 +364,17 @@
             "title": "Generation",
             "type": "integer"
           },
+          "original": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original"
+          },
           "prompt": {
             "title": "Prompt",
             "type": "string"
@@ -1725,7 +1736,8 @@
                 "recursive",
                 "paraphrased",
                 "benchmark_near",
-                "human_control"
+                "human_control",
+                "duplicate"
               ],
               "title": "Type",
               "type": "string"

@@ -398,6 +398,8 @@ export interface components {
       contamination_ratio: number;
       /** Generation */
       generation: number;
+      /** Original */
+      original?: string | null;
       /** Prompt */
       prompt: string;
       /** Response */
@@ -942,7 +944,8 @@ export interface operations {
           | "recursive"
           | "paraphrased"
           | "benchmark_near"
-          | "human_control";
+          | "human_control"
+          | "duplicate";
         ratio: number;
         seed?: number;
         limit?: number;
