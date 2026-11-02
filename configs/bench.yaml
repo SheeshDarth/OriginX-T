@@ -1,0 +1,31 @@
+# ORIGIN-T-Bench (HANDBOOK §9.2): every grid cell's training set as a file, plus a manifest.
+#
+#   python -m src.bench.build --config configs/bench.yaml
+#
+# Each dataset is rebuilt from its grid config: the same draw, and the grid's cached
+# pools under pools_dir/<fingerprint>/. Pools are NOT reproducible across machines, so copy
+# data/processed/grid_pools/ from the machine that ran the grid (Vishnu's) first
+# (HANDBOOK §12.3). The build refuses a missing pool rather than generate a different one.
+#
+# Output (bench/<dataset>/...) is data: git-ignored, released on the Hub at CP3 (§9.5).
+# The datasheet is bench/README.md.
+
+version: "0.1"
+output_dir: bench
+
+datasets:
+  - name: wikitext2
+    grid_config: configs/grid.yaml
+    source: "WikiText-2 (raw), Merity et al. 2016, https://huggingface.co/datasets/Salesforce/wikitext"
+    licence: CC BY-SA 3.0 (and GFDL), as the source; derived files are shared under CC BY-SA 3.0
+  # Enable once Track C's TinyStories grid (C6) has run and its pools are copied over.
+  # - name: tinystories
+  #   grid_config: configs/grid_tinystories.yaml
+  #   source: "TinyStories, Eldan & Li 2023, https://huggingface.co/datasets/roneneldan/TinyStories"
+  #   licence: CDLA-Sharing-1.0, as the source
+
+# Types the grid does not train on, built here deterministically from each seed's clean half
+# at the grid's ratios and seeds. Not part of any grid result.
+extra_types:
+  duplicate:
+    exact_fraction: 0.5   # share of copies that are verbatim; the rest are near-exact (benchmark_near.perturb)
