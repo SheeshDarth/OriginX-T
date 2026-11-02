@@ -104,14 +104,20 @@ class TrainLogger:
 
     def __init__(self, path: str | Path, run_id: str, probe: Sequence[str], *, every: int = 10,
                  batch_size: int = 16, max_len: int = 256, measure: Measure = measure,
-                 on_row: Callable[[dict[str, Any]], None] = lambda row: None) -> None:
+                 on_row: Callable[[dict[str, Any]], None] = lambda row: None,
+                 monitor: Optional[Any] = None) -> None:
+        """``monitor``: a calibrated ``src.evaluation.alarm.Monitor``; with it, rows carry the
+        live alarm (it latches on the first signal past the threshold)."""
         if every < 1:
             raise ValueError("every must be >= 1")
         if not probe:
             raise ValueError("the probe set is empty")
         self.path, self.run_id, self.probe = Path(path), run_id, list(probe)
         self.every, self.batch_size, self.max_len = every, batch_size, max_len
-        self._measure, self._on_row = measure, on_row
+        self._measure, self._on_row, self.monitor = measure, on_row, monitor
+        if monitor is not None and monitor.threshold is None:
+            raise ValueError("the monitor is not calibrated")
+        self._alarm: Optional[str] = None  # the signal that fired, once it has
         self._w0: Optional[dict[str, Any]] = None
         self.rows: list[dict[str, Any]] = []
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +138,13 @@ class TrainLogger:
         row = {"schema": "trainlog/1", "run_id": self.run_id, "step": step,
                "holdout_loss": values.get("holdout_loss"),
                **{f"sig_{k}": values.get(k) for k in SIGNALS}, "alarm": False, "alarm_signal": None}
+        if self.monitor is not None and self._alarm is None and self.rows:
+            over = [(d, sig) for _, sig, d in self.monitor.deviations([self.rows[0], row])
+                    if d > self.monitor.threshold]
+            if over:
+                self._alarm = f"sig_{max(over)[1]}"
+        if self._alarm is not None:
+            row["alarm"], row["alarm_signal"] = True, self._alarm
         with self.path.open("a", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps(row) + "\n")
             fh.flush()
@@ -178,13 +191,23 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("--dataset", default="wikitext2")
     p.add_argument("--cells", nargs="*", default=[], help="grid cell ids, e.g. synthetic_r1_s0")
     p.add_argument("--preset", choices=sorted(PRESETS))
+    p.add_argument("--healthy-seeds", metavar="A-B",
+                   help="also log clean ratio-0 runs for these seeds (any seed: they need no contamination "
+                        "pool), e.g. 3-42, for X3's healthy band and calibration")
     p.add_argument("--every", type=int, default=10)
     p.add_argument("--out-dir", default="reports/trainlogs")
     p.add_argument("--models-dir", default="data/models/live", help="scratch; deleted after each run")
     args = p.parse_args(argv)
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
-    wanted = list(dict.fromkeys(args.cells + PRESETS.get(args.preset or "", [])))
     cells = {c.id: c for c in make_cells(cfg["types"], cfg["ratios"], cfg["seeds"])}
+    healthy = []
+    if args.healthy_seeds:
+        lo, _, hi = args.healthy_seeds.partition("-")
+        for s in range(int(lo), int(hi or lo) + 1):
+            cell = Cell(cfg["types"][0], 0.0, s)
+            cells.setdefault(cell.id, cell)
+            healthy.append(cell.id)
+    wanted = list(dict.fromkeys(args.cells + PRESETS.get(args.preset or "", []) + healthy))
     unknown = [c for c in wanted if c not in cells]
     if unknown or not wanted:
         raise SystemExit(f"unknown or no cells: {unknown or wanted}; choose from this grid's cells")

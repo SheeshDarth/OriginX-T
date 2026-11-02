@@ -1,0 +1,48 @@
+# Gate X3: live collapse alarm with a calibrated false-alarm rate (HANDBOOK §11, #37).
+#
+#   python -m src.evaluation.live --config configs/grid.yaml --healthy-seeds 3-42   # healthy runs
+#   python -m src.evaluation.live --config configs/grid.yaml --cells <the collapsing runs below>
+#   python -m src.evaluation.alarm --config configs/x3.yaml                       # the verdict
+#
+# THIS IS THE RULE. Like GATE 2/3, it is fixed before the result is seen. Every number below is
+# PROPOSED until the CP0 meeting (#21) confirms it; then set gate.confirmed: true and never
+# change it. src.evaluation.alarm refuses to compute a verdict while confirmed is false.
+#
+# Method (src/evaluation/alarm.py): a healthy band per signal and step from healthy_fit, a
+# split-conformal threshold from healthy_cal (P(a healthy run ever alarms) <= alpha), and the
+# observed false-alarm rate on healthy_test. A collapsing run "breaches" at the first step its
+# holdout-loss change is above the healthy band by more than the loss's own conformal threshold
+# (one-sided, same alpha). Within a run the loss never rises on WikiText (#98): every run
+# improves, contaminated ones less, so damage is a gap from healthy runs, not a turn.
+
+dataset: wikitext2
+trainlog_dir: reports/trainlogs
+output_dir: reports/x3
+
+# the six GATE 3 signals (trainlog/1 sig_*), all two-sided
+signals: [eff_rank_last, part_ratio_last, anisotropy_last, dead_fraction_mean, stable_rank_attn, delta_rel_norm]
+
+runs:
+  # three disjoint sets of clean runs (ratio 0, seeds beyond the grid's)
+  healthy_fit: [synthetic_r0_s3, synthetic_r0_s4, synthetic_r0_s5, synthetic_r0_s6, synthetic_r0_s7,
+                synthetic_r0_s8, synthetic_r0_s9, synthetic_r0_s10, synthetic_r0_s11, synthetic_r0_s12]
+  healthy_cal: [synthetic_r0_s13, synthetic_r0_s14, synthetic_r0_s15, synthetic_r0_s16, synthetic_r0_s17,
+                synthetic_r0_s18, synthetic_r0_s19, synthetic_r0_s20, synthetic_r0_s21, synthetic_r0_s22,
+                synthetic_r0_s23, synthetic_r0_s24, synthetic_r0_s25, synthetic_r0_s26, synthetic_r0_s27,
+                synthetic_r0_s28, synthetic_r0_s29, synthetic_r0_s30, synthetic_r0_s31, synthetic_r0_s32]
+  # held-out healthy runs: new clean seeds, the grid's clean runs and the human_control arm
+  healthy_test: [synthetic_r0_s33, synthetic_r0_s34, synthetic_r0_s35, synthetic_r0_s36, synthetic_r0_s37,
+                 synthetic_r0_s38, synthetic_r0_s39, synthetic_r0_s40, synthetic_r0_s41, synthetic_r0_s42,
+                 synthetic_r0_s0, synthetic_r0_s1, synthetic_r0_s2,
+                 human_control_r1_s0, human_control_r1_s1, human_control_r1_s2]
+  # the model-generated types at half and full dose (benchmark_near leaks rather than collapses)
+  collapsing: [synthetic_r0.5_s0, synthetic_r0.5_s1, synthetic_r0.5_s2, synthetic_r1_s0, synthetic_r1_s1,
+               synthetic_r1_s2, recursive_r0.5_s0, recursive_r0.5_s1, recursive_r0.5_s2, recursive_r1_s0,
+               recursive_r1_s1, recursive_r1_s2, paraphrased_r0.5_s0, paraphrased_r0.5_s1,
+               paraphrased_r0.5_s2, paraphrased_r1_s0, paraphrased_r1_s1, paraphrased_r1_s2]
+
+gate:
+  confirmed: false                     # PROPOSED: set true at CP0 (#21), then freeze
+  alpha: 0.05                          # target false-alarm rate (needs >= 19 healthy_cal runs: 20 here)
+  min_early_alarm_rate: 0.5            # alarm strictly before the breach on >= 50% of breaching runs
+  max_observed_false_alarm_rate: 0.10  # on healthy_test
