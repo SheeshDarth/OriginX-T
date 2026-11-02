@@ -1,0 +1,31 @@
+# X1 repair-and-verify (HANDBOOK §9.3, B8 pilot -> B9 full; src/mitigation/repair.py).
+#
+#   python -m src.mitigation.harm   --config configs/grid.yaml --cells <cells below>   # harm scores first
+#   python -m src.mitigation.repair --config configs/repair.yaml
+#
+# Needs the grid's pools (training sets) and results.jsonl (recovery); harm_guided and
+# repr_sim also need the harm scores, which need the grid's checkpoints. Copy pools and
+# checkpoints from the machine that ran the grid (HANDBOOK §12.3). Strategies without
+# scores yet are skipped with a warning, so risk_guided/random/perplexity_filter/oracle can
+# run first. A run cut short resumes from `output`.
+#
+# Pilot (B8): 1 seed, ratio 0.5, synthetic + recursive = 2 cells x 6 strategies = 12
+# fine-tunes, ~75 s each on an RTX 2050, so ~15 min. Decide go/no-go at CP1; the cut-off is
+# 2026-12-15 (pilot must beat random, otherwise report a negative result).
+# Full (B9): list every cell at ratios 0.5 and 1 for synthetic, recursive, paraphrased and
+# benchmark_near, seeds 0-2 (24 cells x 6 strategies).
+#
+# Gate X1 (§11, fixed before results; computed in the summary): harm_guided recovery is at
+# least 10 points above random's at ratio 0.5 on >= 2 of the 3 collapse types, every seed.
+
+grid_config: configs/grid.yaml
+dataset: wikitext2
+cells: [synthetic_r0.5_s0, recursive_r0.5_s0]
+pilot_cells: [synthetic_r0.5_s0, recursive_r0.5_s0]
+strategies: [harm_guided, repr_sim, risk_guided, random, perplexity_filter, oracle]
+k: contaminated          # replace as many samples as the cell has contaminated ones (or an integer)
+
+device: auto
+models_dir: data/models/repair   # git-ignored; repaired checkpoints are deleted after scoring
+keep_models: false
+output: reports/repair/wikitext2.jsonl   # repair/1 (§7.5), committed; summary next to it
