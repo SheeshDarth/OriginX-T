@@ -8,6 +8,7 @@ import {
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { TYPES } from "./components/charts";
 import { Audit } from "./routes/Audit";
+import { Bench } from "./routes/Bench";
 import { CellDetail } from "./routes/CellDetail";
 import { Curves } from "./routes/Curves";
 import { Monitor } from "./routes/monitor/Monitor";
@@ -57,6 +58,9 @@ const root = createRootRoute({
           <Link to="/repair" className="text-muted [&.active]:text-fg">
             Repair
           </Link>
+          <Link to="/bench" className="text-muted [&.active]:text-fg">
+            Bench
+          </Link>
           <Link to="/monitor" className="text-muted [&.active]:text-fg">
             Live monitor
           </Link>
@@ -79,6 +83,7 @@ export const routeTree = root.addChildren([
     path: "/repair",
     component: Repair,
   }),
+  createRoute({ getParentRoute: () => root, path: "/bench", component: Bench }),
   createRoute({
     getParentRoute: () => root,
     path: "/curves",

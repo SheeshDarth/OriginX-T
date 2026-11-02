@@ -133,6 +133,23 @@ def test_bench_never_serves_holdout_text_and_respects_the_limit(client):
     assert len(client.get(url + "&limit=2").json()) == 2
 
 
+def test_bench_serves_the_original_a_copy_was_made_from(root):
+    (root / "configs").mkdir(exist_ok=True)
+    shutil.copy(REPO / "configs/grid.yaml", root / "configs/grid.yaml")
+    row = {"prompt": "", "label": None, "generation": 0, "split": "train"}
+    _jsonl(root / "data/processed/wikitext2_train_kept.jsonl", [{"sample_id": "k1", "response": "A cat sat.", "source": "human", **row}])
+    _jsonl(root / "data/processed/wikitext2_validation.jsonl", [{"sample_id": "v1", "response": "The sky.", "source": "human", **row}])
+    _jsonl(root / "data/processed/wikitext2_train_hidden_holdout.jsonl", [{"sample_id": "h1", "response": "secret", "source": "human", **row}])
+    s = {"prompt": "", "generation": 0, "contamination_ratio": 0.5, "benchmark_near_score": 1.0, "split": "train"}
+    _jsonl(root / "bench/wikitext2/duplicate/r0.5/s0.jsonl", [
+        {"sample_id": "k1-dup0", "response": "A cat sat", "source": "duplicate", **s},
+        {"sample_id": "v1-near3", "response": "the sky", "source": "benchmark_near", **s},
+        {"sample_id": "h1-dup1", "response": "secret!", "source": "duplicate", **s},
+        {"sample_id": "k1", "response": "A cat sat.", "source": "human", **s}])
+    got = TestClient(api.create_app(root)).get("/v1/bench/samples?dataset=wikitext2&type=duplicate&ratio=0.5").json()
+    assert [r["original"] for r in got] == ["A cat sat.", "The sky.", None, None]  # never a holdout text
+
+
 @pytest.mark.parametrize("url, status", [
     ("/v1/grids/tinystories/results", 404),        # not produced yet
     ("/v1/runs/missing_run/trainlog", 404),

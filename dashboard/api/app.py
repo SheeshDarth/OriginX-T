@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import re
@@ -32,6 +33,7 @@ API_VERSION = "1.4.0"  # 1.1: audits; 1.2: /runs/{id}/stream; 1.3: /risk/evaluat
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
+BenchType = Literal[(*CONTAMINATION_TYPES, "duplicate")]  # type: ignore[valid-type]  # duplicate is bench-only (B4)
 GRID_DIRS: dict[str, str] = {"wikitext2": "reports/grid", "tinystories": "reports/grid_tinystories"}
 GRID_CONFIGS: dict[str, str] = {"wikitext2": "configs/grid.yaml", "tinystories": "configs/grid_tinystories.yaml"}
 DEPLOYED_MODEL = "reports/risk/model.json"  # written by python -m src.risk.classifier
@@ -281,6 +283,7 @@ class BenchSample(Model):
     contamination_ratio: float
     benchmark_near_score: float
     split: str
+    original: Optional[str] = None    # the text a duplicate / benchmark_near copy was made from, if found
 
 
 class Contribution(Model):
@@ -678,7 +681,7 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
 
     @app.get("/v1/bench/samples", response_model=list[BenchSample], tags=["bench"])
     def bench_samples(
-        request: Request, response: Response, dataset: Dataset, type: ContaminationType,
+        request: Request, response: Response, dataset: Dataset, type: BenchType,
         ratio: Annotated[float, Query(ge=0, le=1)], seed: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=500)] = 50,
     ) -> Any:
@@ -687,7 +690,24 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
         if cached:
             return cached
         # belt and braces: a bench file must never hold holdout text, but never serve it either
-        return [s for s in reports.jsonl(rel) if s.get("split") != "hidden_holdout"][:limit]
+        rows = [s for s in reports.jsonl(rel) if s.get("split") != "hidden_holdout"][:limit]
+        found = originals(dataset)
+        for s in rows:
+            stem = s["sample_id"].rsplit("-near", 1)[0].rsplit("-dup", 1)[0]
+            s["original"] = found.get(stem) if stem != s["sample_id"] else None
+        return rows
+
+    @functools.lru_cache(maxsize=2)
+    def originals(dataset: str) -> dict[str, str]:
+        """Texts copies are made from, by id: the kept corpus and the benchmark split, never the holdout."""
+        import yaml
+
+        from src.ingestion.loaders import load_dataset
+        try:
+            d = yaml.safe_load(reports.path(GRID_CONFIGS[dataset]).read_text(encoding="utf-8"))["data"]
+            return {x.sample_id: x.response for k in ("kept", "benchmark") for x in load_dataset(reports.path(d[k]))}
+        except FileNotFoundError:  # corpora not on this server: serve the samples without originals
+            return {}
 
     # ponytail: jobs live in memory and are lost on restart; persist them (reports/audits/)
     # if audits must outlive the server. One worker: audits share one GPU and its loaded models.
