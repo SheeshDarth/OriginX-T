@@ -197,36 +197,77 @@
       "BaselineComparison": {
         "properties": {
           "auroc_baseline": {
-            "title": "Auroc Baseline",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auroc Baseline"
           },
           "auroc_model": {
-            "title": "Auroc Model",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auroc Model"
           },
           "column": {
             "title": "Column",
             "type": "string"
           },
           "difference": {
-            "$ref": "#/components/schemas/Estimate"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Estimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model_beats_baseline": {
-            "title": "Model Beats Baseline",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Beats Baseline"
           },
           "n": {
-            "title": "N",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           }
         },
         "required": [
-          "column",
-          "n",
-          "auroc_model",
-          "auroc_baseline",
-          "difference",
-          "model_beats_baseline"
+          "column"
         ],
         "title": "BaselineComparison",
         "type": "object"

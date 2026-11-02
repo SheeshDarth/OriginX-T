@@ -23,12 +23,13 @@ export function PlotFigure({
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = make();
+    el.setAttribute("aria-hidden", "true"); // Plot labels its <g>s without roles; the figure speaks as one image
     ref.current?.replaceChildren(el);
     return () => el.remove();
   }, deps); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <figure>
-      <div ref={ref} />
+      <div ref={ref} role="img" aria-label={caption} />
       <figcaption className="mt-1 text-xs text-muted">{caption}</figcaption>
     </figure>
   );

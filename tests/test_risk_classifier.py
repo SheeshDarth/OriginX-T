@@ -103,3 +103,23 @@ def test_cli_writes_risk_1_rows_and_an_evaluation(tmp_path):
     # 6 calibration rows can't support alpha 0.1 (k = ceil(7 * 0.9) = 7 > 6): every set is {0, 1}
     assert all(r["conformal_set"] == [0, 1] for r in rows) and conf["coverage"]["value"] == 1.0
     assert conf["target"] == 0.9 and 0 <= conf["coverage"]["value"] <= 1 and conf["n_cal_per_fold"] == [6]
+
+
+def test_gradient_descent_runs_to_the_optimum_not_a_step_count():
+    rows = _rows()
+    y = [r["label"] for r in rows]
+    m = LogReg(lr=0.005, l2=0.1).fit(rows, y, ["f_lex_signal", "f_lex_noise"])  # small steps: needs >2000
+    X = [m._x(r) for r in rows]
+    p = m.predict(rows)
+    grad = [sum((pi - yi) * x[j] for pi, yi, x in zip(p, y, X)) / len(y) + 0.1 * m.w[j] for j in range(2)]
+    assert max(map(abs, grad)) < 1e-6
+
+
+def test_the_hand_rolled_model_matches_scikit_learn():
+    pytest.importorskip("sklearn")
+    from src.risk.crosscheck import SkLogReg
+
+    rows = _rows()
+    y, cols = [r["label"] for r in rows], ["f_lex_signal", "f_lex_noise"]
+    ours, theirs = LogReg(l2=0.1).fit(rows, y, cols), SkLogReg(l2=0.1).fit(rows, y, cols)
+    assert ours.predict(rows) == pytest.approx(theirs.predict(rows), abs=1e-4)

@@ -11,6 +11,7 @@ pnpm dev                   # http://localhost:5173; set VITE_API_URL to point el
 ```
 
 - `pnpm typecheck && pnpm lint && pnpm test`: what CI runs.
+- `pnpm e2e`: the demo flows in a real browser (light and dark) against the real API, with axe WCAG AA checks. It starts both servers itself. First time: `pnpm exec playwright install chromium`.
 - `pnpm gen:api`: regenerate `src/api/schema.d.ts` after `dashboard/api/openapi.json` changes.
   Never hand-write request or response types.
 - Tests mock the API with MSW, so they need no backend.

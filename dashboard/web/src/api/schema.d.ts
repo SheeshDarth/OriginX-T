@@ -304,16 +304,18 @@ export interface components {
     /** BaselineComparison */
     BaselineComparison: {
       /** Auroc Baseline */
-      auroc_baseline: number;
+      auroc_baseline?: number | null;
       /** Auroc Model */
-      auroc_model: number;
+      auroc_model?: number | null;
       /** Column */
       column: string;
-      difference: components["schemas"]["Estimate"];
+      difference?: components["schemas"]["Estimate"] | null;
       /** Model Beats Baseline */
-      model_beats_baseline: boolean;
+      model_beats_baseline?: boolean | null;
       /** N */
-      n: number;
+      n?: number | null;
+      /** Note */
+      note?: string | null;
     };
     /** BenchSample */
     BenchSample: {

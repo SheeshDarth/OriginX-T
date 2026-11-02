@@ -126,6 +126,13 @@ test("the evaluation card states AUROC, coverage against its target, n and the b
 
 test("a missing baseline or estimate reads as such", () => {
   expect(baselineLine(null)).toBe("Baseline ref-LM loss: not computed yet");
+  expect(
+    baselineLine({
+      column: "f_model_loss_mean",
+      n: 20,
+      note: "one class only",
+    }),
+  ).toBe("Baseline ref-LM loss: one class only");
   expect([
     est(null),
     est({ value: 0.5 }),

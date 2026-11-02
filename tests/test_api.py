@@ -399,3 +399,13 @@ def test_stream_errors_are_problem_json(client):
     assert client.get("/v1/runs/missing_run/stream").status_code == 404
     r = client.get("/v1/runs/.hidden/stream")
     assert r.status_code == 422 and r.headers["content-type"] == "application/problem+json"
+
+@pytest.mark.parametrize("ref", [{"column": "f_model_loss_mean", "note": "column not computed yet"},
+                                 {"column": "f_model_loss_mean", "n": 20, "note": "one class only"}])
+def test_evaluation_with_a_baseline_that_is_not_comparable(root, ref):
+    path = root / "reports/risk/evaluation.json"
+    ev = json.loads(path.read_text(encoding="utf-8"))
+    ev["baselines"]["ref_lm_loss"] = ref
+    path.write_text(json.dumps(ev), encoding="utf-8")
+    r = TestClient(api.create_app(root)).get("/v1/risk/evaluation")
+    assert r.status_code == 200 and r.json()["baselines"]["ref_lm_loss"]["note"] == ref["note"]

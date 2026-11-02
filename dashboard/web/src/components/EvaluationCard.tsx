@@ -23,6 +23,8 @@ export function baselineLine(
   b: RiskEvaluation["baselines"]["ref_lm_loss"],
 ): string {
   if (!b) return "Baseline ref-LM loss: not computed yet";
+  if (b.auroc_baseline == null)
+    return `Baseline ref-LM loss: ${b.note ?? "not comparable"}`;
   return `Baseline ref-LM loss (AUROC ${b.auroc_baseline.toFixed(2)}): ${b.model_beats_baseline ? "beaten" : "not beaten"}, difference ${est(b.difference, signed)}`;
 }
 
