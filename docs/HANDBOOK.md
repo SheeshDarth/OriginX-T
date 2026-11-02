@@ -516,9 +516,9 @@ Track C's X2 jobs (§12.2).
 - [ ] `duplicate` generator (`source="duplicate"` is in the schema, nothing produces it):
       exact and near-exact duplicates of *human* training rows (not benchmark items), at
       controlled rates. Tests. **Bump a pool version only if it changes an existing type.**
-- [ ] WikiText heading lines (`= = History = =` ×129): decide to drop or keep `= … =` lines in
+- [x] WikiText heading lines (`= = History = =` ×129): decide to drop or keep `= … =` lines in
       the normalizer **for new datasets only**. Changing WikiText's normalizer would change
-      fingerprinted data (§3.2). Record the decision in §13.
+      fingerprinted data (§3.2). **Kept** (D9).
 - [ ] Provide the TinyStories normalization + holdout for Track C's grid (§10.2):
       `normalize_corpora` already has the TinyStories entry (`max_rows: 50000`). Run holdout +
       leak check, and confirm sizes.
@@ -738,6 +738,7 @@ X2 subset.** Always state the expected runtime when booking.
 | D6 | **UI = React + TypeScript + Vite + TanStack + Tailwind tokens + Radix + Observable Plot; API = FastAPI. No Streamlit/Gradio** | Product-grade UI is a deliverable (§8.6) |
 | D7 | WikiText GATE 3 results are **exploratory**. Confirmatory GATE 3 on TinyStories with a rule fixed at CP0 | 2026-10-31: GATE 3 not evaluable (no negatives); anisotropy fell, against the pre-registered +1 direction |
 | D8 | Stretch X1–X3 adopted with gates and cut-offs (§11) | 2026-10-31 |
+| D9 | **Heading lines are kept**: the normalizer never drops `= … =` lines, for WikiText or new datasets | #60, 2026-11-03; one rule for every dataset, no fingerprint change, and the holdout already splits by text hash (D1) so repeated headings can't straddle it |
 
 ### 13.3 GATE 3 confirmatory rule (PROPOSED: confirm at CP0, merge before TinyStories runs)
 Proposed: signals are **two-sided** (direction learned on WikiText, fixed for TinyStories:
