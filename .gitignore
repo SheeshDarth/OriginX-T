@@ -26,6 +26,10 @@ docs/TEAM_WORKPLAN.md
 docs/EXECUTION_PLAN.md
 docs/MONTH1_PLAN.md
 
+# ORIGIN-T-Bench build output (released on the Hub, not in git); the datasheet is committed
+bench/*
+!bench/README.md
+
 # Fine-tuned checkpoints (regenerable)
 data/models/
 
