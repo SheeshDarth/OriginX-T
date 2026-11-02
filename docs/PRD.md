@@ -97,6 +97,8 @@ suggests mitigation.
 | Generic AI-text detectors | Human-vs-AI classification | ORIGIN-T predicts *downstream degradation*, not just origin |
 | Benchmark-contamination surveys | Token-overlap leakage detection | ORIGIN-T uses behavioral (performance-gap) leakage detection |
 | Model-collapse papers (Shumailov et al.) | Establish the phenomenon | ORIGIN-T builds a *predictive, calibrated* early-warning system on top of it |
+| Pre-hoc fine-tuning predictors (TuneAhead, ICML 2026) | Predict a fine-tuning score from dataset descriptors + a short probe run, before full training | ORIGIN-T predicts *contamination-caused degradation* (synthetic, recursive, leaked) on a ground-truth testbed, with conformal risk sets. "Predicting before training" alone is not novel (`docs/STRETCH_GOALS.md`, Core) |
+| Detector-based collapse prevention (Drayson et al., EMNLP 2025) | Resample towards likely-human text to avoid collapse | X1 tests cleaning by measured *harm* against cleaning by *origin*, with this as the baseline |
 
 ## 9. Product risks
 
