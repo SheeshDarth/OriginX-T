@@ -247,8 +247,9 @@ and must not be the headline. What remains ours:
 3. contamination-specific signals (leak features, reference-LM and semantic families).
 
 TuneAhead is the baseline a reviewer will ask for. Our own result already shows why the
-comparison matters: on WikiText the full risk model (AUROC 0.81) does **not** beat the single
-reference-LM loss feature (0.84) (`reports/risk/evaluation.json`, H2).
+comparison matters: on WikiText the full risk model (leave-one-type-out AUROC 0.84) only
+**ties** the single reference-LM loss feature (difference +0.001, CI [0, 0.008]) after the
+refit in #105 (`reports/risk/evaluation.json`, H2).
 
 ---
 

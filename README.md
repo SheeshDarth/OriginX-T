@@ -5,7 +5,7 @@
 > "Predict whether a dataset will damage an LLM — before the fine-tuning damage becomes visible."
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-GATE%200%20passed-green.svg)](docs/PROJECT_REPORT.md)
+[![Status](https://img.shields.io/badge/status-CP0%3A%20GATE%200%20%2B%202%20passed-green.svg)](#status)
 [![CI](https://github.com/SheeshDarth/OriginX-T/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
 ORIGIN-T is a final-year AIML research project that audits datasets for synthetic,
@@ -31,18 +31,19 @@ fully visible. It blends three ideas into one coherent system: **ORIGIN**
 
 ## Core features
 
-| # | Feature | Status |
-|---|---------|--------|
-| 1 | Controlled contamination generator (synthetic / recursive / paraphrased / benchmark-near) | Committed |
-| 2 | Feature suite (lexical, entropy, perplexity, semantic, MAUVE, leakage) | Committed |
-| 3 | LoRA fine-tuning grid + collapse-curve measurement | Committed |
-| 4 | Calibrated risk classifier (degrade / no-degrade) | Committed |
-| 5 | Split-conformal risk guarantee | Gated |
-| 6 | Discrete-time survival early-warning model | Gated |
-| 7 | White-box representational-collapse signals (effective rank, anisotropy) | Gated |
-| 8 | Causal attribution (Shapley) + collapse scaling law | Gated |
-| 9 | Safe-mix mitigation optimizer | Gated |
-| 10 | **ORIGIN-T-Bench** — released benchmark + leaderboard | Committed (M8) |
+| # | Feature | Scope | Status (2026-11-02) |
+|---|---------|-------|---------------------|
+| 1 | Controlled contamination generator (synthetic / recursive / paraphrased / benchmark-near / duplicate) + a healthy `human_control` arm | Committed | Done |
+| 2 | Feature suite (lexical, leakage, reference-LM, semantic incl. MAUVE) | Committed | Done on WikiText; TinyStories waits for its grid |
+| 3 | LoRA fine-tuning grid + collapse-curve measurement | Committed | Done on WikiText (75 cells); TinyStories next |
+| 4 | Calibrated risk classifier (degrade / no-degrade) | Committed | Done on WikiText; GATE 1 needs a second dataset |
+| 5 | Split-conformal risk guarantee | Gated | Built; under-covers on WikiText (0.72 vs 0.90) |
+| 6 | Discrete-time survival early-warning model | Gated | Not started (only if CP2 is green) |
+| 7 | White-box representational-collapse signals (effective rank, anisotropy) | Gated | Done on 66 checkpoints, and live during training (X3) |
+| 8 | Causal attribution (Shapley) + collapse scaling law | Gated | Not started |
+| 9 | Mitigation: harm-based repair (X1) and rare-cluster preservation | Gated | Fixtures done; pilot not started |
+| 10 | **ORIGIN-T-Bench** — released benchmark + leaderboard | Committed (M8) | Not started |
+| 11 | **ORIGIN-T Console**: web UI over a FastAPI backend | Could | Overview, curves, cell detail, audit, repair, live monitor |
 
 See [docs/PRD.md](docs/PRD.md) for full scope and [docs/TRD.md](docs/TRD.md) for
 the technical design.
@@ -68,7 +69,9 @@ Python 3.11 &middot; PyTorch &middot; HF `transformers` / `datasets` / `peft` /
 `sentence-transformers`, FAISS, `mauve-text` &middot; `lifelines` / `pycox`
 (survival) &middot; `MAPIE` (conformal) &middot; `shap` &middot;
 `TransformerLens` / `nnsight` (interpretability) &middot; MLflow / W&B
-(offline) &middot; Streamlit (dashboard).
+(offline) &middot; console: FastAPI + Pydantic v2 API, React + TypeScript (Vite, TanStack,
+Tailwind tokens, Observable Plot), Playwright + axe. No Streamlit (HANDBOOK D6). Conformal
+prediction is hand-rolled; survival libraries are not used yet.
 
 ## Repository structure
 
@@ -76,9 +79,12 @@ Python 3.11 &middot; PyTorch &middot; HF `transformers` / `datasets` / `peft` /
 OriginX-T/
   README.md
   docs/
+    HANDBOOK.md            The operating manual: tracks, owners, interfaces, gates (read first)
     PRD.md                 Product Requirements Document
     TRD.md                 Technical Requirements Document
+    STRETCH_GOALS.md       X1-X3 research, prior art and novelty claims
     PROJECT_REPORT.md       Full research report (literature, roadmap, risks)
+    paper/                 Paper draft, one section per track
   configs/                 Experiment & model configs
   data/                    Raw / processed datasets (large data git-ignored)
   src/
@@ -89,7 +95,9 @@ OriginX-T/
     evaluation/               Degradation metrics, benchmark evaluation
     risk/                    Static, survival, conformal, causal, scaling-law models
     mitigation/               Data cleaning, safe-mix optimization
-  dashboard/                Streamlit evidence dashboard (Sprint 14)
+  dashboard/
+    api/                    FastAPI: read-only reports, audit jobs, SSE run stream (openapi.json = the contract)
+    web/                    ORIGIN-T Console (React + TypeScript; see its README)
   reports/                  Figures, experiment logs
   tests/                    Unit / smoke tests
   .github/workflows/ci.yml  Lint + test CI
@@ -126,12 +134,28 @@ python -m src.finetune.grid --config configs/grid.yaml                 # the ful
 python -m src.finetune.grid --config configs/grid.yaml --summarize-only   # re-apply GATE 2, redraw the figure; trains nothing
 python -m src.finetune.grid --config configs/grid.yaml --rerun-types benchmark_near   # redo one type's cells after its generator changed
 python -m src.evaluation.whitebox --config configs/whitebox.yaml   # white-box signals (effective rank, anisotropy, ...) from the kept checkpoints
+python -m src.evaluation.earlywarning --config configs/earlywarning.yaml   # GATE 3 on the grid
 python -m src.features.run_table                                    # one CSV row per grid run: outcomes + white-box signals
 ```
 
-GPU work (fine-tuning) runs on free Google Colab / Kaggle notebooks — see
-[docs/TRD.md](docs/TRD.md#compute-budget) for the compute plan. A local RTX
-4050 6GB GPU is sufficient for feature extraction and small-model inference.
+Features, risk and audit (they need the grid's `data/processed/` files and cached pools;
+copy them from the machine that ran the grid, HANDBOOK §12.3):
+
+```bash
+python -m src.features.suite --config configs/features.yaml --dataset wikitext2   # features/1 per cell
+python -m src.features.scores --dataset wikitext2     # per-sample risk scores (risk_reflm, risk_knn)
+python -m src.risk.classifier                         # risk model, conformal sets, baselines, GATE 1
+python -m src.risk.audit my_data.jsonl --grid configs/grid.yaml   # audit a new dataset
+python -m src.evaluation.live --preset x3             # X3: log white-box signals during training
+python -m src.evaluation.alarm --config configs/x3.yaml          # Gate X3 (after CP0 confirms the rule)
+```
+
+The console: `python -m dashboard.api` (http://127.0.0.1:8000, docs at `/docs`), then
+`dashboard/web/README.md` for the UI.
+
+Every grid in this repo ran on one RTX 2050 (4 GB): DistilGPT-2 + LoRA cells take about
+75 s each. Bigger targets (X2) run on Siddharth's GPU or Colab/Kaggle, see
+[docs/TRD.md](docs/TRD.md#compute-budget) and HANDBOOK §12.
 
 ## Team
 
@@ -148,6 +172,49 @@ GPU work (fine-tuning) runs on free Google Colab / Kaggle notebooks — see
 status: [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#roadmap).
 
 ## Status
+
+**Snapshot at CP0 (2026-11-02, the day before the kickoff meeting).** Every gate is a rule
+fixed before its results existed ([TRD §11](docs/TRD.md#11-gono-go-gates), HANDBOOK §11, §13).
+
+| Gate | Rule (short) | Verdict | Evidence |
+|---|---|---|---|
+| GATE 0 | Recursive self-training raises holdout ppl on every seed | **Passed** | 3/3 seeds, 56.3 → 67.6 ([#8](https://github.com/SheeshDarth/OriginX-T/pull/8)) |
+| GATE 1 | Feature suite + static baseline run cleanly on ≥ 2 datasets | **Not evaluable** | WikiText only; TinyStories pending ([#94](https://github.com/SheeshDarth/OriginX-T/pull/94), [#105](https://github.com/SheeshDarth/OriginX-T/pull/105)) |
+| GATE 2 | Dose-response, above seed noise at ratio 0.25 | **Passed** | 75-cell WikiText grid ([#11](https://github.com/SheeshDarth/OriginX-T/pull/11), [#12](https://github.com/SheeshDarth/OriginX-T/pull/12), [#73](https://github.com/SheeshDarth/OriginX-T/pull/73)) |
+| GATE 3 | A white-box signal warns before collapse | **Failed (exploratory)** | Structural, see below; confirmatory run on TinyStories ([#73](https://github.com/SheeshDarth/OriginX-T/pull/73)) |
+| X1 | Harm-guided repair beats random by ≥ 10 pts | Not started | Fixtures only ([#106](https://github.com/SheeshDarth/OriginX-T/pull/106)) |
+| X2 | Small-model canary predicts a bigger model's damage (ρ ≥ 0.7) | Not started | Needs Siddharth's GPU |
+| X3 | Live alarm before the breach at a calibrated 5% FA | **Built, verdict after CP0** | Monitor, data, pre-registered plan ([#98](https://github.com/SheeshDarth/OriginX-T/pull/98), [#110](https://github.com/SheeshDarth/OriginX-T/pull/110)) |
+
+**Risk model (WikiText, 2026-11-01, [#105](https://github.com/SheeshDarth/OriginX-T/pull/105)).**
+Leave-one-type-out AUROC **0.84** [0.72, 0.94], ECE 0.22. The conformal sets **under-cover**:
+0.72 against the 0.90 target. And the full model only **ties** the single reference-LM loss
+feature (difference +0.001, CI [0, 0.008]): H2 ("a multi-feature model beats a simple
+detector") is not shown yet. Prior art also narrowed the novelty claim: predicting a
+fine-tuning outcome before training is published (TuneAhead, ICML 2026), so ORIGIN-T's
+claim is contamination-caused degradation with conformal sets on a ground-truth testbed
+([docs/STRETCH_GOALS.md](docs/STRETCH_GOALS.md), [#112](https://github.com/SheeshDarth/OriginX-T/pull/112)).
+
+**Features (WikiText, [#91](https://github.com/SheeshDarth/OriginX-T/pull/91),
+[#103](https://github.com/SheeshDarth/OriginX-T/pull/103)).** Generated text is easy for a
+fixed reference LM (gpt2 loss 3.99 clean → 2.13 for recursive data), and benchmark
+near-copies crowd together (MAUVE 0.08). Per sample, the reference-LM score finds generated
+text (AUROC 0.98 recursive) and the kNN score finds near-copies (0.97)
+([#92](https://github.com/SheeshDarth/OriginX-T/pull/92)). Rare-cluster loss, the classic
+collapse signature, does *not* separate generated text from healthy text at this scale.
+
+**X3 (live, during training, [#98](https://github.com/SheeshDarth/OriginX-T/pull/98)).** Logging
+the white-box signals every 10 steps is bit-for-bit neutral: of the 67 logged runs, the 24
+that are grid cells reproduce the grid's holdout perplexity exactly (the rest use new seeds). Within a run the holdout loss never rises: contaminated runs just improve less than
+healthy ones, so damage is a gap, not a turn. Anisotropy separates by step 20 of 125. The
+Gate X3 rule is pre-registered in `configs/x3.yaml`, to be confirmed at CP0 before any
+verdict.
+
+**Next: CP1 (Fri 2026-11-20).** TinyStories prep (#58, Siddharth) unblocks the second grid,
+GATE 1 and the confirmatory GATE 3; X1's pilot starts; X2 needs the target model on
+Siddharth's GPU.
+
+<details><summary>Earlier results (GATE 0, GATE 2, benchmark_near, GATE 3 in detail)</summary>
 
 **GATE 0 passed** ([#8](https://github.com/SheeshDarth/OriginX-T/pull/8)): recursive
 training on a model's own output raises hidden-holdout perplexity on every one of
@@ -181,21 +248,13 @@ direction. It is reported as exploratory (D7). The confirmatory GATE 3 on TinySt
 needs stages before onset (finer low ratios, or training steps as in X3), fixed in its rule
 beforehand ([HANDBOOK §13](docs/HANDBOOK.md)).
 
-**Working on this repo? Read [docs/HANDBOOK.md](docs/HANDBOOK.md) first.** It is the
-operating manual: tracks, owners, interfaces, checkpoints and rules.
+</details>
 
-Done so far: the contamination generators, the hidden-holdout safeguards, run logging
-(MLflow), the fine-tuning grid with its results, the white-box signals
-(`src/evaluation/whitebox.py`, [#15](https://github.com/SheeshDarth/OriginX-T/pull/15);
-measured on all 66 checkpoints), the scoring metrics
-(`src/evaluation/scoring.py`, [#16](https://github.com/SheeshDarth/OriginX-T/pull/16):
-AUROC/AUPRC/F1, bootstrap CIs, ECE, conformal coverage, lead stage) and a per-run table
-joining the two ([#17](https://github.com/SheeshDarth/OriginX-T/pull/17)). Not in the repo
-yet: the feature suite proper (`src/features/` holds only that table), and with it the
-risk classifier, conformal prediction and survival models that need it (GATE 1 and
-GATE 3). What counts as "collapsed" (the label) is still to be fixed by the team. See the roadmap for the full plan.
-Weekly updates go to the faculty guide; see the template in
-[docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#hod-reporting).
+**Working on this repo? Read [docs/HANDBOOK.md](docs/HANDBOOK.md) first.** It is the
+operating manual: tracks, owners, interfaces, checkpoints and rules. Work is tracked as
+[GitHub Issues](https://github.com/SheeshDarth/OriginX-T/issues) by checkpoint milestone.
+Weekly updates for the faculty guide are in [docs/hod/](docs/hod/) (template:
+[docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#hod-reporting)).
 
 ## License
 
