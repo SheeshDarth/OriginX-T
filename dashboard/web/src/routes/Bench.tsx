@@ -53,7 +53,7 @@ function Diff({ original, copy }: { original: string; copy: string }) {
         ) : p.op === "del" ? (
           <del
             key={k}
-            className="bg-bad/20 text-bad"
+            className="bg-bad/30 font-semibold"
             title="only in the original"
           >
             {p.text}
@@ -61,7 +61,7 @@ function Diff({ original, copy }: { original: string; copy: string }) {
         ) : (
           <ins
             key={k}
-            className="bg-accent/20 no-underline"
+            className="bg-accent/30 font-semibold no-underline"
             title="only in the copy"
           >
             {p.text}
