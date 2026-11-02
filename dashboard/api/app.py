@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import threading
 import time
 import uuid
@@ -27,7 +28,7 @@ from src.ingestion.loaders import normalize_record
 from src.ingestion.schema import Sample
 
 REPO = Path(__file__).resolve().parents[2]
-API_VERSION = "1.3.0"  # 1.1: audits; 1.2: GET /v1/runs/{id}/stream; 1.3: GET /v1/risk/evaluation
+API_VERSION = "1.4.0"  # 1.1: audits; 1.2: /runs/{id}/stream; 1.3: /risk/evaluation; 1.4: /runs, /x3/monitor
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
@@ -238,6 +239,39 @@ class TrainlogRow(Model):
     alarm_signal: Optional[str]  # a key of ``signals``
 
 
+class RunSummary(Model):
+    """One logged run in ``reports/trainlogs/`` (X3), for the live monitor's run list."""
+
+    run_id: str
+    dataset: Optional[Dataset]   # from ``<dataset>_<cell>``; None for other run ids
+    cell: Optional[str]
+    type: Optional[str]
+    ratio: Optional[float]
+    seed: Optional[int]
+    n_rows: int
+    last_step: Optional[int]
+    alarm_step: Optional[int]    # first step with ``alarm`` set, if any
+    alarm_signal: Optional[str]  # without the ``sig_`` prefix
+    updated_at: str              # the log's last write (ISO 8601, UTC): a live run keeps moving
+
+
+class AlarmMonitor(Model):
+    """A calibrated X3 monitor (``src.evaluation.alarm.Monitor.to_dict``): the healthy band.
+
+    Per signal and step: ``center`` and ``scale`` of the change since step 0 over healthy runs.
+    A run alarms when ``|change - center| / scale > threshold`` (two-sided unless ``one_sided``).
+    """
+
+    signals: list[str]
+    one_sided: bool
+    center: dict[str, dict[str, float]]   # signal -> step (as a string) -> value
+    scale: dict[str, dict[str, float]]
+    alpha: Optional[float]
+    n_calibration: int
+    threshold: Optional[float]            # None when infinite (too few calibration runs)
+    threshold_infinite: bool
+
+
 class BenchSample(Model):
     sample_id: str
     prompt: str
@@ -412,6 +446,25 @@ def _with_prefix(row: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {k[len(prefix):]: v for k, v in row.items() if k.startswith(prefix)}
 
 
+_CELL = re.compile(r"^(?P<type>.+)_r(?P<ratio>[0-9.]+)_s(?P<seed>[0-9]+)$")
+
+
+def _run_summary(path: Path) -> dict[str, Any]:
+    """A ``RunSummary`` of one trainlog file; ``<dataset>_<cell>`` run ids are parsed."""
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    run_id = path.stem
+    dataset, _, cell = run_id.partition("_")
+    m = _CELL.match(cell) if dataset in GRID_DIRS else None
+    fired = next((r for r in rows if r.get("alarm")), None)
+    updated = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+    return {"run_id": run_id, "dataset": dataset if m else None, "cell": cell if m else None,
+            "type": m and m["type"], "ratio": m and float(m["ratio"]), "seed": m and int(m["seed"]),
+            "n_rows": len(rows), "last_step": rows[-1]["step"] if rows else None,
+            "alarm_step": fired and fired["step"],
+            "alarm_signal": fired and (fired.get("alarm_signal") or "").removeprefix("sig_") or None,
+            "updated_at": updated}
+
+
 def _trainlog_row(r: dict[str, Any]) -> dict[str, Any]:
     """A trainlog/1 file row as the API serves it (``TrainlogRow``)."""
     return {"run_id": r["run_id"], "step": r["step"], "holdout_loss": r["holdout_loss"],
@@ -559,6 +612,21 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
     def repair(dataset: Dataset, request: Request, response: Response) -> Any:
         rel = f"reports/repair/{dataset}.jsonl"
         return _cached(request, response, reports.etag(rel)) or reports.jsonl(rel)
+
+    @app.get("/v1/runs", response_model=list[RunSummary], tags=["runs"])
+    def runs(request: Request, response: Response) -> Any:
+        """Every logged run (``reports/trainlogs/*.jsonl``), most recently written first."""
+        folder = reports.path("reports/trainlogs")
+        files = sorted(folder.glob("*.jsonl")) if folder.is_dir() else []
+        etag = reports.etag(*(f"reports/trainlogs/{f.name}" for f in files))
+        return _cached(request, response, etag) or sorted(
+            (_run_summary(f) for f in files), key=lambda r: (r["updated_at"], r["run_id"]), reverse=True)
+
+    @app.get("/v1/x3/monitor", response_model=AlarmMonitor, tags=["runs"])
+    def x3_monitor(request: Request, response: Response) -> Any:
+        """The calibrated X3 monitor (healthy band + threshold); 404 until it is calibrated."""
+        rel = "reports/x3/monitor.json"
+        return _cached(request, response, reports.etag(rel)) or reports.json(rel)
 
     @app.get("/v1/runs/{run_id}/trainlog", response_model=list[TrainlogRow], tags=["runs"])
     def trainlog(run_id: RunId, request: Request, response: Response) -> Any:

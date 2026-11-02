@@ -10,6 +10,7 @@ import { TYPES } from "./components/charts";
 import { Audit } from "./routes/Audit";
 import { CellDetail } from "./routes/CellDetail";
 import { Curves } from "./routes/Curves";
+import { Monitor } from "./routes/monitor/Monitor";
 import { Overview } from "./routes/Overview";
 import { Repair } from "./routes/Repair";
 
@@ -17,6 +18,7 @@ const COMMANDS: Command[] = [
   { label: "Overview", to: "/" },
   { label: "Collapse curves", to: "/curves" },
   { label: "Audit a dataset", to: "/audit" },
+  { label: "Live monitor (X3)", to: "/monitor" },
   ...["gate_0", "gate_1", "gate_2", "gate_3", "x1", "x2", "x3"].map((id) => ({
     label: `Gate ${id.replace("gate_", "").toUpperCase()}`,
     to: "/",
@@ -55,6 +57,9 @@ const root = createRootRoute({
           <Link to="/repair" className="text-muted [&.active]:text-fg">
             Repair
           </Link>
+          <Link to="/monitor" className="text-muted [&.active]:text-fg">
+            Live monitor
+          </Link>
         </nav>
         <kbd className="ml-auto font-mono text-xs text-muted">Ctrl K</kbd>
       </header>
@@ -83,6 +88,16 @@ export const routeTree = root.addChildren([
     getParentRoute: () => root,
     path: "/cells/$dataset/$cell",
     component: CellDetail,
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/monitor",
+    component: Monitor,
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/monitor/$runId",
+    component: Monitor,
   }),
 ]);
 

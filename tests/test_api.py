@@ -34,6 +34,13 @@ def root(tmp_path):
         runs.setdefault(json.loads(line)["run_id"], []).append(json.loads(line))
     for run_id, rows in runs.items():
         _jsonl(tmp_path / f"reports/trainlogs/{run_id}.jsonl", rows)
+    # a calibrated X3 monitor, as src.evaluation.alarm writes it (band from the quiet fixture run)
+    from src.evaluation.alarm import Monitor
+
+    quiet = runs["wikitext2_synthetic_r0_s0"]
+    monitor = Monitor.fit([quiet, quiet], ["anisotropy_last"]).calibrate([quiet] * 19, 0.05)
+    (tmp_path / "reports/x3").mkdir(parents=True)
+    (tmp_path / "reports/x3/monitor.json").write_text(json.dumps(monitor.to_dict()), encoding="utf-8")
     key = {"dataset": "wikitext2", "cell": "synthetic_r0.5_s1"}
     _jsonl(tmp_path / "reports/features/wikitext2.jsonl", [{
         "schema": "features/1", **key, "type": "synthetic", "ratio": 0.5, "seed": 1, "n_samples": 1000,
@@ -68,6 +75,8 @@ URLS = {
     "/v1/risk/evaluation": "/v1/risk/evaluation",
     "/v1/repair/{dataset}": "/v1/repair/wikitext2",
     "/v1/runs/{run_id}/trainlog": "/v1/runs/wikitext2_synthetic_r1_s0/trainlog",
+    "/v1/runs": "/v1/runs",
+    "/v1/x3/monitor": "/v1/x3/monitor",
     "/v1/bench/samples": "/v1/bench/samples?dataset=wikitext2&type=synthetic&ratio=0.5",
 }
 
@@ -409,3 +418,34 @@ def test_evaluation_with_a_baseline_that_is_not_comparable(root, ref):
     path.write_text(json.dumps(ev), encoding="utf-8")
     r = TestClient(api.create_app(root)).get("/v1/risk/evaluation")
     assert r.status_code == 200 and r.json()["baselines"]["ref_lm_loss"]["note"] == ref["note"]
+
+
+# ---------------------------------------------------------------- the run list and the X3 monitor (#40)
+
+
+def test_runs_lists_every_trainlog_with_its_cell_and_alarm(client, root):
+    _jsonl(root / "reports/trainlogs/tiny.jsonl", [])  # a run id that is not <dataset>_<cell>
+    runs = {r["run_id"]: r for r in client.get("/v1/runs").json()}
+    fired = runs["wikitext2_synthetic_r1_s0"]
+    assert (fired["dataset"], fired["type"], fired["ratio"], fired["seed"]) == ("wikitext2", "synthetic", 1.0, 0)
+    assert (fired["n_rows"], fired["last_step"]) == (10, 225)
+    assert (fired["alarm_step"], fired["alarm_signal"]) == (125, "anisotropy_last")
+    quiet = runs["wikitext2_synthetic_r0_s0"]
+    assert quiet["alarm_step"] is None and quiet["alarm_signal"] is None
+    assert runs["tiny"]["dataset"] is None and runs["tiny"]["n_rows"] == 0 and runs["tiny"]["last_step"] is None
+    assert fired["updated_at"].endswith("+00:00")
+
+
+def test_runs_parse_type_names_with_underscores(client, root):
+    first = json.loads((root / "reports/trainlogs/wikitext2_synthetic_r1_s0.jsonl").read_text().splitlines()[0])
+    _jsonl(root / "reports/trainlogs/wikitext2_human_control_r0.5_s12.jsonl",
+           [{**first, "run_id": "wikitext2_human_control_r0.5_s12"}])
+    r = {x["run_id"]: x for x in client.get("/v1/runs").json()}["wikitext2_human_control_r0.5_s12"]
+    assert (r["type"], r["ratio"], r["seed"], r["cell"]) == ("human_control", 0.5, 12, "human_control_r0.5_s12")
+
+
+def test_no_trainlogs_is_an_empty_list_and_no_monitor_is_not_produced_yet(tmp_path):
+    c = TestClient(api.create_app(tmp_path))
+    assert c.get("/v1/runs").json() == []
+    r = c.get("/v1/x3/monitor")
+    assert r.status_code == 404 and "reports/x3/monitor.json" in r.json()["detail"]
