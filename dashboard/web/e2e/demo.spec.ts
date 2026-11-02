@@ -109,3 +109,26 @@ test("audit: upload a dataset, wait for the job, read the report", async ({
   await expect(page.getByText("Flagged samples: 1 of 1000")).toBeVisible();
   await noA11yViolations(page);
 });
+
+test("monitor: pick a logged run, replay it, read its signals", async ({
+  page,
+}) => {
+  // the committed X3 trainlogs (#98, #110) through the real run list and SSE stream
+  await page.goto("/monitor");
+  await expect(page.getByText(/^Healthy \(\d+\)$/)).toBeVisible();
+  await noA11yViolations(page);
+
+  await page.getByLabel("Filter runs").fill("recursive_r1_s0");
+  await page.getByRole("link", { name: "recursive_r1_s0" }).click();
+  await expect(page).toHaveURL(/\/monitor\/wikitext2_recursive_r1_s0$/);
+  // a finished log replays all 14 rows, then the stream ends
+  await expect(page.getByText(/14 rows, last step 125/)).toBeVisible();
+  await expect(
+    page.getByText(/Finished: no new rows for a minute/),
+  ).toBeVisible();
+  await expect(page.locator("figure")).toHaveCount(7); // loss + six signals
+  await expect(
+    page.getByRole("row", { name: /Anisotropy, last layer/ }),
+  ).toBeVisible();
+  await noA11yViolations(page);
+});

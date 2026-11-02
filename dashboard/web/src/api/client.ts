@@ -9,10 +9,17 @@ export type WhiteboxCell = S["WhiteboxCell"];
 export type FeatureRow = S["FeatureRow"];
 export type RepairResult = S["RepairResult"];
 export type RiskEvaluation = S["RiskEvaluation"];
+export type TrainlogRow = S["TrainlogRow"];
+export type RunSummary = S["RunSummary"];
+export type AlarmMonitor = S["AlarmMonitor"];
 export type Dataset = "wikitext2" | "tinystories";
 
+/** Also used directly by EventSource (SSE), which openapi-fetch does not cover. */
+export const API_URL: string =
+  import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+
 export const api = createClient<paths>({
-  baseUrl: import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000",
+  baseUrl: API_URL,
   fetch: (req) => globalThis.fetch(req), // looked up per call, so test mocks (MSW) apply
 });
 

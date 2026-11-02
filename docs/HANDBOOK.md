@@ -658,9 +658,11 @@ These follow Track A's feature-family signature, `family(texts, ctx) -> dict[str
 ### 10.8 UI screens for X3 and X2, by CP3
 Built inside Revanth's app (`dashboard/web/`), using only his shell, tokens, shared
 components and chart helpers (§8.6). Revanth reviews for consistency.
-- [ ] `routes/monitor/`: **Live monitor (X3).** Streaming training signals from
+- [x] `routes/monitor/`: **Live monitor (X3).** Streaming training signals from
       `/v1/runs/{id}/stream` (SSE), alarm threshold bands, alarm event log. Replays committed
-      trainlogs when no run is live.
+      trainlogs when no run is live. Done (#40): `/monitor` and `/monitor/$runId`; run list from
+      `GET /v1/runs`, healthy bands from `GET /v1/x3/monitor` (404, and said so, until X3 is
+      calibrated after CP0); Vitest with a fake EventSource, Playwright flow with axe.
 - [ ] `routes/canary/`: **Canary (X2).** Proxy-vs-target scatter with ρ and CI, and a
       predict-for-this-dataset card.
 - [ ] Playwright e2e for both screens (one flow each), plus axe checks.
