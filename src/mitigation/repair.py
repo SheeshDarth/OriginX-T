@@ -37,6 +37,14 @@ Replacements are a fresh draw of human text disjoint from both halves of the see
 the ``human_control`` pool and the whole hidden holdout, so a repaired set never trains on
 the holdout and never repeats a text it already holds.
 
+**Rare-cluster preservation** (§9.4, the core mitigation, PRD H5; B10). For the strategies
+listed in ``preserve_rare_clusters``, each is also run as ``<strategy>+rare``: the same
+ranking, except that a sample is never replaced while it is the last one left in the set
+from a cluster that is rare in the seed's clean human draw (Track C's
+``semantic.cluster_assignments``: the reference's k-means tail). Such samples move to the
+end of the ranking, so they are replaced only if the budget cannot be met otherwise. The
+summary's ``h5`` compares recovery and distinct-2 with and without the rule.
+
 Rows are appended to ``output`` after every retrain, so a run cut short resumes. Repaired
 checkpoints are deleted after scoring unless ``keep_models`` is set. The summary
 (``<output stem>_summary.json``) holds the pilot go/no-go and Gate X1 (§11, fixed before
@@ -63,6 +71,7 @@ SCORED: dict[str, tuple[str, int]] = {
 }
 GATE_MARGIN = 0.10      # Gate X1: harm-guided recovery - random recovery, in recovery units (10 points)
 GATE_MIN_TYPES = 2      # ... on at least this many collapse types, every seed
+RARE = "+rare"          # suffix of a strategy run with rare-cluster preservation (B10)
 
 
 def recovery(ppl_contaminated: float, ppl_clean: float, ppl_repaired: float) -> Optional[float]:
@@ -86,6 +95,26 @@ def rank(samples: Sequence[Any], strategy: str, scores: Optional[Mapping[str, Op
         raise ValueError(f"{strategy} needs {method} scores")
     signed = [None if scores.get(s.sample_id) is None else sign * scores[s.sample_id] for s in samples]
     return sorted(order, key=lambda i: (signed[i] is None, -(signed[i] or 0.0)))
+
+
+def protect_rare(worst: Sequence[int], labels: Sequence[int], tail: set[int]) -> list[int]:
+    """``worst`` with every sample that would be the last of its tail cluster moved to the end.
+
+    Walking the ranking, a sample from a tail cluster is deferred when it is the only one of
+    its cluster still in the set; otherwise it is taken and its cluster's count drops. So any
+    top-k of the result keeps every tail cluster non-empty, unless k exceeds the samples taken.
+    """
+    left = {c: sum(1 for x in labels if x == c) for c in tail}
+    taken, deferred = [], []
+    for i in worst:
+        c = labels[i]
+        if c in tail and left[c] == 1:
+            deferred.append(i)
+            continue
+        taken.append(i)
+        if c in tail:
+            left[c] -= 1
+    return taken + deferred
 
 
 def replacements(kept: Sequence[Any], holdout: Sequence[Any], data: Mapping[str, Any], seed: int,
@@ -138,12 +167,18 @@ def run_repair(
     done: Optional[Mapping[tuple[str, str], Mapping[str, Any]]] = None,
     on_result: Callable[[dict[str, Any]], None] = lambda row: None,
     warn: Callable[[str], None] = print,
+    preserve: Sequence[str] = (),
+    clusters_for: Optional[Callable[[Any, list[Any]], tuple[list[int], set[int]]]] = None,
 ) -> list[dict[str, Any]]:
     """Retrain every (cell, strategy) not in ``done`` and return the repair/1 rows, in order.
 
     ``train(samples, cell, strategy)`` returns a model handle that ``evaluate`` scores and
-    ``release`` frees. ``grid_rows`` is the grid's results by cell id (for recovery).
+    ``release`` frees. ``grid_rows`` is the grid's results by cell id (for recovery). Each
+    strategy in ``preserve`` also runs as ``<strategy>+rare``, with ``clusters_for(cell,
+    samples)`` giving each sample's cluster and the rare (tail) clusters.
     """
+    if preserve and clusters_for is None:
+        raise ValueError("preserve needs clusters_for")
     from ..evaluation.metrics import distinct_n
     from ..finetune.collapse import training_text
 
@@ -156,26 +191,32 @@ def run_repair(
             raise ValueError(f"{cell.id}: k={budget} must be in 1..{len(samples)}")
         cont = grid_rows[cell.id]
         clean = next(r for r in grid_rows.values() if r["ratio"] == 0 and r["seed"] == cell.seed)
-        fresh = None
-        for strategy in strategies:
-            if done and (cell.id, strategy) in done:
-                rows.append(dict(done[(cell.id, strategy)]))
+        fresh, clusters = None, None
+        runs = [(s, False) for s in strategies] + [(s, True) for s in strategies if s in preserve]
+        for strategy, rare in runs:
+            name = strategy + RARE if rare else strategy
+            if done and (cell.id, name) in done:
+                rows.append(dict(done[(cell.id, name)]))
                 continue
             scores = None
             if strategy in SCORED:
                 scores = scores_for(SCORED[strategy][0], cell.id)
                 if not scores:
-                    warn(f"  {cell.id} {strategy}: no {SCORED[strategy][0]} scores, skipped")
+                    warn(f"  {cell.id} {name}: no {SCORED[strategy][0]} scores, skipped")
                     continue
             fresh = fresh if fresh is not None else fresh_for(cell.seed, budget)
-            data = repaired(samples, rank(samples, strategy, scores, cell.seed), fresh, budget)
-            model = train(data, cell, strategy)
+            worst = rank(samples, strategy, scores, cell.seed)
+            if rare:
+                clusters = clusters if clusters is not None else clusters_for(cell, samples)
+                worst = protect_rare(worst, clusters[0], clusters[1])
+            data = repaired(samples, worst, fresh, budget)
+            model = train(data, cell, name)
             try:
                 metrics = evaluate(model)
             finally:
                 release(model)
             row = {
-                "schema": "repair/1", "dataset": dataset, "cell": cell.id, "strategy": strategy,
+                "schema": "repair/1", "dataset": dataset, "cell": cell.id, "strategy": name,
                 "k_replaced": budget,
                 "holdout_ppl": round(metrics["holdout_ppl"], 4),
                 "benchmark_ppl": round(metrics["benchmark_ppl"], 4),
@@ -190,8 +231,21 @@ def run_repair(
 
 def summarize(rows: Sequence[Mapping[str, Any]], *, collapse_types: Sequence[str],
               seeds: Sequence[int], pilot_cells: Sequence[str]) -> dict[str, Any]:
-    """Pilot go/no-go (harm-guided beats random on every pilot cell) and Gate X1."""
+    """Pilot go/no-go (harm-guided beats random on every pilot cell), Gate X1, and H5.
+
+    ``h5``: per strategy run with rare-cluster preservation, per cell, the change in recovery
+    and in distinct-2 that the rule made (``+rare`` minus without).
+    """
     rec = {(r["cell"], r["strategy"]): r["recovery"] for r in rows}
+    by_key = {(r["cell"], r["strategy"]): r for r in rows}
+    h5: dict[str, dict[str, Any]] = {}
+    for (cell, name), r in by_key.items():
+        base = by_key.get((cell, name[: -len(RARE)])) if name.endswith(RARE) else None
+        if base is not None:
+            d_rec = (None if r["recovery"] is None or base["recovery"] is None
+                     else round(r["recovery"] - base["recovery"], 6))
+            h5.setdefault(name[: -len(RARE)], {})[cell] = {
+                "recovery_change": d_rec, "distinct_2_change": round(r["distinct_2"] - base["distinct_2"], 6)}
 
     def margin(cell: str) -> Optional[float]:
         h, r = rec.get((cell, "harm_guided")), rec.get((cell, "random"))
@@ -208,7 +262,8 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, collapse_types: Sequence[str
     return {"pilot": {"margins": pilot, "status": pilot_status},
             "gate_x1": {"margins": per_type, "passing_types": passing, "status": gate,
                         "rule": f"harm_guided - random recovery >= {GATE_MARGIN} at ratio 0.5 on >= "
-                                f"{GATE_MIN_TYPES} of {list(collapse_types)}, every seed"}}
+                                f"{GATE_MIN_TYPES} of {list(collapse_types)}, every seed"},
+            "h5": h5}
 
 
 def _read(path: Path) -> list[dict[str, Any]]:
@@ -232,9 +287,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = p.parse_args(argv)
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     grid = yaml.safe_load(Path(cfg["grid_config"]).read_text(encoding="utf-8"))
-    unknown = sorted(set(cfg["strategies"]) - set(STRATEGIES))
+    preserve = cfg.get("preserve_rare_clusters") or []
+    unknown = sorted(set(cfg["strategies"]) - set(STRATEGIES)) + sorted(set(preserve) - set(cfg["strategies"]))
     if unknown:
-        raise SystemExit(f"unknown strategies {unknown}; use {list(STRATEGIES)}")
+        raise SystemExit(f"unknown strategies {unknown}; use {list(STRATEGIES)} (preserve_rare_clusters "
+                         "must also be in strategies)")
     by_id = {c.id: c for c in make_cells(grid["types"], grid["ratios"], grid["seeds"])}
     bad = [c for c in cfg["cells"] if c not in by_id or by_id[c].ratio == 0]
     if bad:
@@ -287,12 +344,22 @@ def main(argv: Optional[list[str]] = None) -> int:
             with out.open("a", encoding="utf-8", newline="\n") as fh:
                 fh.write(json.dumps(row) + "\n")
 
+        def clusters_for(cell: Any, samples: list[Any]) -> tuple[list[int], set[int]]:
+            from ..features.semantic import cluster_assignments
+            from ..finetune.grid import draw_human
+
+            reference = [training_text(s) for s in draw_human(kept, d, cell.seed)[0]]  # the seed's clean draw
+            got = cluster_assignments([training_text(s) for s in samples],
+                                      {"reference_texts": reference, "device": device})
+            return got["labels"], set(got["tail"])
+
         run_repair(
             cells, cfg["strategies"], dataset=cfg["dataset"],
             samples_for=lambda cell: training_set(grid, cell, kept=kept),
             fresh_for=lambda seed, k: replacements(kept, holdout_rows, d, seed, k),
             scores_for=scores_for, grid_rows=grid_rows, train=train, evaluate=evaluate,
             release=release, k=cfg.get("k", "contaminated"), done=done, on_result=on_result,
+            preserve=preserve, clusters_for=clusters_for,
         )
 
     rows = _read(out)

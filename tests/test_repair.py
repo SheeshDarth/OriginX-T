@@ -9,7 +9,7 @@ from src.finetune.grid import Cell, draw_human, human_control_pool
 from src.ingestion.check_leakage import text_fingerprint
 from src.ingestion.schema import Sample
 from src.mitigation.repair import (
-    STRATEGIES, rank, recovery, repaired, replacements, run_repair, summarize,
+    STRATEGIES, protect_rare, rank, recovery, repaired, replacements, run_repair, summarize,
 )
 
 REPAIR_KEYS = {"schema", "dataset", "cell", "strategy", "k_replaced", "holdout_ppl", "benchmark_ppl",
@@ -80,7 +80,17 @@ GRID_ROWS = {
 }
 
 
-def _run(strategies, *, scores=None, done=None, k="contaminated"):
+def test_protect_rare_never_empties_a_tail_cluster_within_the_budget():
+    labels = [0, 7, 0, 7, 0, 9]  # 7 and 9 are rare (tail) clusters
+    out = protect_rare([5, 1, 3, 0, 2, 4], labels, {7, 9})
+    assert out == [1, 0, 2, 4, 5, 3], "5 is 9's only member and 3 becomes 7's last, so both move to the end"
+    assert sorted(out) == list(range(6))
+    for k in range(1, 5):
+        assert {7, 9} <= {labels[i] for i in range(6) if i not in out[:k]}
+    assert protect_rare([2, 0, 1], [0, 0, 0], set()) == [2, 0, 1], "no tail clusters: ranking unchanged"
+
+
+def _run(strategies, *, scores=None, done=None, k="contaminated", **kw):
     samples = [_s(i) if i % 2 else _s(i, "synthetic") for i in range(10)]
     trained, warnings = [], []
 
@@ -96,9 +106,22 @@ def _run(strategies, *, scores=None, done=None, k="contaminated"):
         [Cell("synthetic", 0.5, 0)], strategies, dataset="wikitext2",
         samples_for=lambda cell: samples, fresh_for=lambda seed, k: [_s(100 + i) for i in range(k)],
         scores_for=lambda method, cell: (scores or {}).get(method), grid_rows=GRID_ROWS,
-        train=train, evaluate=evaluate, k=k, done=done, warn=warnings.append,
+        train=train, evaluate=evaluate, k=k, done=done, warn=warnings.append, **kw,
     )
     return rows, trained, warnings
+
+
+def test_preserved_strategies_also_run_with_the_rare_rule():
+    # sample 0 (contaminated) is the only member of rare cluster 5: the oracle must keep it
+    labels = [5] + [0] * 9
+    rows, trained, _ = _run(["oracle", "random"], preserve=["oracle"],
+                            clusters_for=lambda cell, samples: (labels, {5}))
+    assert [r["strategy"] for r in rows] == ["oracle", "random", "oracle+rare"]
+    rare = dict(trained)["oracle+rare"]
+    assert len(rare) == 10 and rare[0].sample_id == "synthetic-0"
+    assert rows[0]["recovery"] == 1.0 and rows[2]["recovery"] == pytest.approx(0.8)
+    with pytest.raises(ValueError, match="clusters_for"):
+        _run(["oracle"], preserve=["oracle"])
 
 
 def test_rows_are_repair_1_with_recovery_from_the_grid():
@@ -157,6 +180,14 @@ def test_pilot_and_gate_x1_follow_the_preregistered_rule():
     tie = [_row(c, "random", 0.3) for c in pilot] + [_row(c, "harm_guided", 0.3) for c in pilot]
     nogo = summarize(tie, collapse_types=types, seeds=seeds, pilot_cells=pilot)
     assert nogo["pilot"]["status"] == "no-go", "a tie does not beat random"
+
+
+def test_h5_reports_what_the_rare_rule_changed():
+    rows = [{"cell": "c", "strategy": "random", "recovery": 0.5, "distinct_2": 0.6},
+            {"cell": "c", "strategy": "random+rare", "recovery": 0.4, "distinct_2": 0.65},
+            {"cell": "d", "strategy": "random+rare", "recovery": None, "distinct_2": 0.6}]
+    h5 = summarize(rows, collapse_types=["synthetic"], seeds=[0], pilot_cells=[])["h5"]
+    assert h5 == {"random": {"c": {"recovery_change": -0.1, "distinct_2_change": 0.05}}}
 
 
 def test_shipped_config_and_fixture_use_the_same_strategies():

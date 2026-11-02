@@ -24,6 +24,10 @@ cells: [synthetic_r0.5_s0, recursive_r0.5_s0]
 pilot_cells: [synthetic_r0.5_s0, recursive_r0.5_s0]
 strategies: [harm_guided, repr_sim, risk_guided, random, perplexity_filter, oracle]
 k: contaminated          # replace as many samples as the cell has contaminated ones (or an integer)
+# Rare-cluster preservation (B10, H5): these strategies also run as <strategy>+rare, never
+# emptying a cluster that is rare in the seed's clean draw (semantic.cluster_assignments).
+# Empty for the pilot; set to e.g. [harm_guided, risk_guided, random] once the pilot is go.
+preserve_rare_clusters: []
 
 device: auto
 models_dir: data/models/repair   # git-ignored; repaired checkpoints are deleted after scoring
