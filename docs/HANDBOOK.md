@@ -738,7 +738,7 @@ X2 subset.** Always state the expected runtime when booking.
 | D6 | **UI = React + TypeScript + Vite + TanStack + Tailwind tokens + Radix + Observable Plot; API = FastAPI. No Streamlit/Gradio** | Product-grade UI is a deliverable (§8.6) |
 | D7 | WikiText GATE 3 results are **exploratory**. Confirmatory GATE 3 on TinyStories with a rule fixed at CP0 | 2026-10-31: GATE 3 not evaluable (no negatives); anisotropy fell, against the pre-registered +1 direction |
 | D8 | Stretch X1–X3 adopted with gates and cut-offs (§11) | 2026-10-31 |
-| D9 | **Heading lines are kept**: the normalizer never drops `= … =` lines, for WikiText or new datasets | #60, 2026-11-03; one rule for every dataset, no fingerprint change, and the holdout already splits by text hash (D1) so repeated headings can't straddle it |
+| D9 | **Heading lines are kept**: the normalizer never drops `= … =` lines, for WikiText or new datasets | #60, 2026-11-03; the grid's 20–150 word window already drops all but 9 of WikiText's 6831 heading rows, so the choice barely touches a training set; one rule for every dataset, no fingerprint change, and the text-hash holdout (D1) keeps repeated headings on one side. A dataset without `min_words` would get them back (~¼ of WikiText rows) |
 
 ### 13.3 GATE 3 confirmatory rule (PROPOSED: confirm at CP0, merge before TinyStories runs)
 Proposed: signals are **two-sided** (direction learned on WikiText, fixed for TinyStories:
