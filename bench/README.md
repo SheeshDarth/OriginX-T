@@ -51,7 +51,7 @@ of human text: the healthy arm that should not degrade.
 | `paraphrased` | the second half of the seed's draw | pretrained DistilGPT-2 asked to rewrite each text (see the caveat below) |
 | `benchmark_near` | 200 items from the WikiText-2 **validation** split | surface edits on 70% of copies, the other 30% verbatim (`src/generation/benchmark_near.py`, v2) |
 | `human_control` | a third human draw, disjoint from the hidden holdout | no edits |
-| `duplicate` | the seed's own clean half | 50% verbatim copies, 50% with the same surface edits (`src/generation/duplicate.py`) |
+| `duplicate` | rows kept from the seed's own clean half | the ratio is the share of rows that repeat another row **in the same file**: 50% verbatim copies, 50% with the same surface edits (`src/generation/duplicate.py`). Above 0.5 originals are copied more than once; there is no `r1` file (nothing would be left to copy) |
 
 The model-written pools are the exact ones the grid trained on, copied from the machine
 that ran it. Sampling isn't reproducible across GPUs and library versions, so they are

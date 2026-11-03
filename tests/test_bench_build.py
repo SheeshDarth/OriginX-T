@@ -57,7 +57,7 @@ def test_writes_every_cell_as_the_grid_trained_it_and_a_manifest(tmp_path):
     manifest = build(cfg)
     entry = manifest["datasets"]["toy"]
     assert manifest["schema"] == "bench-manifest/1" and manifest["version"] == "0.1"
-    assert len(entry["files"]) == (len(TYPES) + 1) * 2 * 3  # (grid types + duplicate) x seeds x ratios
+    assert len(entry["files"]) == len(TYPES) * 2 * 3 + 2 * 2  # grid types x seeds x ratios + duplicate without r1
     assert entry["config_fingerprint"] == config_fingerprint(grid)
     assert entry["generator_versions"] == {"synthetic": "1", "benchmark_near": "2"}
     kept = load_dataset(grid["data"]["kept"])
@@ -74,11 +74,14 @@ def test_counts_contamination_and_duplicates_copy_the_clean_half(tmp_path):
     files = {(f["type"], f["ratio"], f["seed"]): f for f in build(cfg)["datasets"]["toy"]["files"]}
     assert files[("synthetic", 0.0, 0)]["n_contaminated"] == 0
     assert files[("synthetic", 0.5, 0)]["n_contaminated"] == 5
-    assert files[("duplicate", 1.0, 0)]["n_contaminated"] == 10
+    assert files[("duplicate", 0.5, 0)]["n_contaminated"] == 5 and ("duplicate", 1.0, 0) not in files
     clean = {s.response for s in load_dataset(tmp_path / "bench" / "toy" / "duplicate" / "r0" / "s0.jsonl")}
-    dups = load_dataset(tmp_path / "bench" / "toy" / "duplicate" / "r1" / "s0.jsonl")
-    assert all(s.source == "duplicate" for s in dups)
-    assert sum(s.response in clean for s in dups) == 5, "exact_fraction 0.5: half are verbatim copies"
+    rows = load_dataset(tmp_path / "bench" / "toy" / "duplicate" / "r0.5" / "s0.jsonl")
+    dups = [s for s in rows if s.source == "duplicate"]
+    by_id = {s.sample_id: s for s in rows}
+    assert len(dups) == 5 and all(s.sample_id.rsplit("-dup", 1)[0] in by_id for s in dups),         "every copy repeats a row that is in the same file"
+    assert sum(s.response == by_id[s.sample_id.rsplit("-dup", 1)[0]].response for s in dups) in (2, 3),         "exact_fraction 0.5: about half are verbatim copies"
+    assert all(s.response in clean for s in rows if s.source == "human")
 
 
 def test_files_are_lf_and_hashes_are_reproducible(tmp_path):
@@ -144,7 +147,7 @@ def test_cli(tmp_path, capsys):
     path = tmp_path / "bench.yaml"
     path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     assert main(["--config", str(path)]) == 0
-    assert "18 files" in capsys.readouterr().out
+    assert "16 files" in capsys.readouterr().out
 
 
 def test_shipped_config_points_at_real_grid_configs():

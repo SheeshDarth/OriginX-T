@@ -28,12 +28,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import random
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
 from ..finetune.grid import (
-    Cell, config_fingerprint, draw_human, make_cells, mixture, pool_tag, training_set,
+    Cell, config_fingerprint, draw_human, make_cells, pool_tag, training_set,
 )
 from ..generation.duplicate import make_duplicates
 from ..ingestion.check_leakage import find_leaks
@@ -72,10 +74,17 @@ def cell_samples(
     if cell.type != "duplicate":
         return training_set(grid, cell, kept=kept)
     human = draw_human(kept, grid["data"], cell.seed)[0]
-    pool = make_duplicates(
-        human, count=len(human), exact_fraction=extra["duplicate"]["exact_fraction"], seed=cell.seed,
-    ) if cell.ratio > 0 else []
-    return mixture(human, pool, cell)
+    # ratio = share of rows that repeat another row in the same file. So the copies are made
+    # from the rows kept, not mixed in independently (mix() would drop most originals, and
+    # leave none at ratio 1). ratio 1 has nothing left to copy, so that cell isn't built.
+    n_dup = round(len(human) * cell.ratio)
+    rng = random.Random(f"duplicate-{cell.seed}")
+    keep = rng.sample(human, len(human) - n_dup)
+    rows = keep + (make_duplicates(
+        keep, count=n_dup, exact_fraction=extra["duplicate"]["exact_fraction"], seed=cell.seed,
+    ) if n_dup else [])
+    rng.shuffle(rows)
+    return [replace(s, contamination_ratio=cell.ratio).validate() for s in rows]
 
 
 def _require(path: str | Path, how: str) -> Path:
@@ -106,7 +115,7 @@ def build_dataset(entry: Mapping[str, Any], cfg: Mapping[str, Any], out: Path) -
     if unknown:
         raise ValueError(f"unknown extra_types {unknown}; use {list(EXTRA_TYPES)}")
     cells = make_cells(grid["types"], grid["ratios"], grid["seeds"])
-    cells += [Cell(t, r, s) for t in extra for s in grid["seeds"] for r in grid["ratios"]]
+    cells += [Cell(t, r, s) for t in extra for s in grid["seeds"] for r in grid["ratios"] if r < 1]
 
     # Every cell is built and checked before any is written, so a missing pool or a leak
     # leaves no half-built dataset behind.

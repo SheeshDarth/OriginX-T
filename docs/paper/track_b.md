@@ -45,7 +45,7 @@ perplexity then falls (−3.4% at ratio 1; HANDBOOK §1, D3 #13). Pools are vers
 
 ## 3. ORIGIN-T-Bench v0.1
 `python -m src.bench.build` writes every grid cell's training set as
-`bench/<dataset>/<type>/r<ratio>/s<seed>.jsonl` (75 WikiText cells, plus 15 duplicate cells)
+`bench/<dataset>/<type>/r<ratio>/s<seed>.jsonl` (75 WikiText cells, plus 12 duplicate cells (no r1: a ratio-1 file would have nothing left to copy))
 with a manifest of SHA-256 hashes, generator versions and the grid's config fingerprint.
 The cells are rebuilt with the grid's own function (`grid.training_set`) from the grid's
 cached pools. Sampling is not reproducible across GPUs, so the build refuses to regenerate
