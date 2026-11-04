@@ -32,7 +32,7 @@ set. The target is a disjoint draw of ``n_holdout`` texts from the rest of the h
 holdout, never trained on. ``true_source`` is copied into each row for evaluation only;
 no score reads it.
 
-Rows go to ``reports/scores/<method>/<dataset>.jsonl`` (scores/1, §7.3), replacing the
+Rows go to ``reports/scores/<method>/<dataset>.jsonl`` (``--scores-dir``) (scores/1, §7.3), replacing the
 scored cells' earlier rows. AUROC against ``true_source != "human"`` for these methods,
 and for Track C's ``risk_*`` scores on the same cells, goes to
 ``reports/scores/<dataset>_harm_eval.json``. torch, transformers and peft are imported
@@ -192,6 +192,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("--dataset", default="wikitext2")
     p.add_argument("--cells", nargs="+", default=list(PILOT_CELLS), help="cell ids (default: the X1 pilot)")
     p.add_argument("--device", default="auto")
+    p.add_argument("--scores-dir", default="reports/scores",
+                   help="where scores/1 rows go (repair.yaml's scores_dir reads them)")
     args = p.parse_args(argv)
 
     grid = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
@@ -215,7 +217,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             new[method] += r
         print(f"  [{i}/{len(args.cells)}] {cid}", flush=True)
 
-    root = Path("reports/scores")
+    root = Path(args.scores_dir)
     for method, rows in new.items():
         path = root / method / f"{args.dataset}.jsonl"
         _write(path, merge_rows(_read(path), rows))
