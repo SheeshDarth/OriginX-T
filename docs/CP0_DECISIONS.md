@@ -1,6 +1,6 @@
 # CP0 decision sheet (issue #21)
 
-For a 30-45 minute call with Vishnu, Revanth and Siddharth. Each decision has the proposed
+**Status: decided 2026-11-08 by Vishnu, without a call.** Siddharth and Revanth review the PR that records these decisions and may object there. Originally written as the agenda for a 30-45 minute call with Vishnu, Revanth and Siddharth. Each decision has the proposed
 value, the options, the evidence and a recommendation. **Nobody should look at a new result
 before these are fixed** (HANDBOOK §3 rule: gates are pre-registered). Status of every number
 below is as of 2026-11-08, `main` at `cae9b56`.
@@ -38,7 +38,7 @@ separate them. Source: PR #73.
 **Recommendation: C.** Keep GATE 3 on the ratio axis (comparable with WikiText) and let X3 own
 the training-step question. Numbers to fix: the ratios, alpha, the 5% false-alarm rate.
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** **C** (finer ratios + two-sided signals). Rule in HANDBOOK §13.3, `configs/earlywarning_tinystories.yaml`.
 
 ## 2. Label D4: what counts as "degraded" (§13 D4)
 
@@ -58,7 +58,7 @@ already in use (`reports/risk/`), so changing it changes the risk results.
 **Recommendation: A** for the paper's first version; state the 3-seed caveat. Revisit if
 TinyStories adds seeds.
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** **A**: keep the default; state the 3-seed caveat in the paper. HANDBOOK D4.
 
 ## 3. Gate X3 (`configs/x3.yaml`, #37)
 
@@ -82,7 +82,7 @@ for diffusion models, 2610.34617). "When Rank Rises" calibrates on 2 seeds and f
 Options: keep (**recommended**); tighten observed false alarms to <= 5%; or widen the collapsing
 set. Whatever is chosen must be fixed now.
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** **Keep as proposed** (alpha 0.05, early-alarm >= 50%, observed false alarms <= 10%). `configs/x3.yaml` is `confirmed: true`.
 
 ## 4. Gate X1 and what X1 claims (#62-#65, PR #122)
 
@@ -108,7 +108,7 @@ collapse.
 
 **Recommendation: B.** Decide before B9 runs (cut-off 2026-12-15).
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** **B**: keep the gate, add the harm-vs-origin secondary, fix the benchmark_near metric, add `risk_knn` as a strategy. HANDBOOK D10.
 
 ## 5. Gate X2 and the GPU (#38, #39, #66, B2)
 
@@ -120,7 +120,7 @@ To decide: **which target model**, **which GPU slots** (the booking calendar, B2
 and whether the reduced-learning-rate proxy (ICLR 2026) is included. Nothing on X2 can start
 without this.
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** **Pythia-410M** (fits the 4 GB card with plain LoRA; subset trained, PR #127). Reduced-learning-rate proxy variant: not in the first pass. HANDBOOK D11.
 
 ## 6. Novelty claims changed by the second literature search (#112)
 
@@ -135,7 +135,7 @@ Adopt, amend or reject the revised wording in `docs/STRETCH_GOALS.md`:
 - **X3:** the guarantee is an application, not a novelty; claim = LM training, enough healthy
   runs, recursive-synthetic collapse.
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** **Adopted** as written in `docs/STRETCH_GOALS.md`. HANDBOOK D12.
 
 ## 7. Risk model status (Revanth, #50, #51)
 
@@ -144,7 +144,7 @@ coverage **0.72 vs the 0.90 target**; the full model only **ties** the single re
 feature (difference +0.001, CI [0, 0.008]), so H2 is not shown. Question: what is the plan, more
 calibration data or a different conformal scheme, and does the paper claim H2?
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** **More calibration data first** (TinyStories adds runs); H2 is not claimed until shown. No rule change.
 
 ## 8. Critical path and housekeeping
 
@@ -156,7 +156,7 @@ Decided: ______________________________________________
 - Weekly HOD update: each student fills hours and a learning line in `docs/hod/`.
 - Who merges what, and review turnaround.
 
-Decided: ______________________________________________
+**Decided (2026-11-08):** TinyStories prep and grid are done (PR #126). GPU calendar (B2) is not needed for X2 now. Rest as listed.
 
 ---
 

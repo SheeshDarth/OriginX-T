@@ -4,9 +4,8 @@
 #   python -m src.evaluation.live --config configs/grid.yaml --cells <the collapsing runs below>
 #   python -m src.evaluation.alarm --config configs/x3.yaml                       # the verdict
 #
-# THIS IS THE RULE. Like GATE 2/3, it is fixed before the result is seen. Every number below is
-# PROPOSED until the CP0 meeting (#21) confirms it; then set gate.confirmed: true and never
-# change it. src.evaluation.alarm refuses to compute a verdict while confirmed is false.
+# THIS IS THE RULE. Like GATE 2/3, it is fixed before the result is seen. CONFIRMED 2026-11-08
+# (Vishnu, docs/CP0_DECISIONS.md decision 3; Siddharth and Revanth review the PR). Never change it. src.evaluation.alarm refuses to compute a verdict while confirmed is false.
 #
 # Method (src/evaluation/alarm.py): a healthy band per signal and step from healthy_fit, a
 # split-conformal threshold from healthy_cal (P(a healthy run ever alarms) <= alpha), and the
@@ -42,7 +41,7 @@ runs:
                paraphrased_r0.5_s2, paraphrased_r1_s0, paraphrased_r1_s1, paraphrased_r1_s2]
 
 gate:
-  confirmed: false                     # PROPOSED: set true at CP0 (#21), then freeze
+  confirmed: true                      # confirmed 2026-11-08; frozen
   alpha: 0.05                          # target false-alarm rate (needs >= 19 healthy_cal runs: 20 here)
   min_early_alarm_rate: 0.5            # alarm strictly before the breach on >= 50% of breaching runs
   max_observed_false_alarm_rate: 0.10  # on healthy_test

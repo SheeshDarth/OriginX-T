@@ -77,11 +77,20 @@ def test_a_trajectory_with_a_stale_or_missing_stage_is_skipped_not_patched():
     assert keys == [("a", 0)] and skipped == [("a", 1), ("b", 0)]
 
 
-def test_direction_must_be_plus_or_minus_one():
+def test_direction_must_be_plus_one_minus_one_or_zero():
     from src.evaluation.earlywarning import risk_trajectories
 
     with pytest.raises(ValueError, match="direction"):
-        risk_trajectories([], "eff_rank_last", direction=0)
+        risk_trajectories([], "eff_rank_last", direction=2)
+
+
+def test_direction_zero_is_the_two_sided_absolute_move():
+    from src.evaluation.earlywarning import risk_trajectories
+
+    rows = _wb(_table("a", 0, [50, 52, 56, 60, 64]), [10, 9, 7, 6, 5])
+    rows += _wb(_table("a", 1, [50.5] * 5), [20, 21, 19, 20, 24])
+    _, risks, _, _ = risk_trajectories(rows, "eff_rank_last", direction=0)
+    assert risks == [[0, 1, 3, 4, 5], [0, 1, 1, 0, 4]]  # a fall and a rise both count
 
 
 def _separable():
@@ -309,3 +318,26 @@ def test_gate3_passes_when_any_one_signal_warns_even_if_the_others_do_not():
     assert out["signals"]["eff_rank_last"]["warns"] and not out["signals"]["anisotropy_last"]["warns"]
     assert out["signals"]["anisotropy_last"]["status"] == "ok"
     assert out["status"] == "passed"
+
+
+def test_lead_stat_picks_the_mean_or_the_median_lead(monkeypatch):
+    from src.evaluation import earlywarning as ew
+
+    rows = _wb(_table("a", 0, [50, 52, 56, 60, 64]), [10, 9, 7, 6, 5]) + _wb(_table("a", 1, [50.5] * 5), [20] * 5)
+    fake = {"status": "ok", "permutation_p": 0.0, "early_warning": {"mean_lead": 1.5, "median_lead": 0}}
+    monkeypatch.setattr(ew, "evaluate_risk", lambda *a, **k: dict(fake))
+    cfg = {"signals": {"eff_rank_last": 0}, "alpha": 0.05, "far": 0.05, "n_boot": 1, "n_perm": 1, "seed": 0}
+
+    assert ew.evaluate_gate3(rows, cfg)["status"] == "passed"  # default: mean lead 1.5 > 0
+    assert ew.evaluate_gate3(rows, {**cfg, "lead_stat": "median"})["status"] == "failed"  # median 0
+
+
+def test_the_confirmatory_tinystories_config_is_two_sided_with_a_median_lead():
+    from pathlib import Path
+
+    import yaml
+
+    g = yaml.safe_load(Path("configs/earlywarning_tinystories.yaml").read_text())["gate3"]
+    assert set(g) == {"signals", "alpha", "far", "lead_stat", "n_boot", "n_perm", "seed"}
+    assert set(g["signals"].values()) == {0} and g["lead_stat"] == "median"
+    assert g["alpha"] == 0.05 and g["far"] == 0.05

@@ -268,10 +268,9 @@ Weekly between checkpoints: async standup Mon/Thu in the team channel (template 
       the §8.6 stack.
 - [x] Add `.gitignore`: `reports/**/*.bak-*`, `dashboard/web/node_modules/`, `dashboard/web/dist/`.
 - [x] README status: benchmark_near re-run, GATE 3 not evaluable, pointer to this handbook.
-- [ ] **At the CP0 meeting, before merging:** confirm or amend the *proposed* GATE 3
-      confirmatory rule (§13.3), Gates X1/X2/X3 (§11) and label D4 (§13). Record the agreed
-      numbers in this PR. They become binding when it merges, which must happen before the
-      TinyStories grid runs.
+- [x] **CP0 decisions** (GATE 3 confirmatory rule §13.3, Gates X1/X2/X3 §11, label D4 §13),
+      decided by Vishnu on 2026-11-08 without a call; Siddharth and Revanth review the PR that
+      records them and may object there. Sheet: `docs/CP0_DECISIONS.md`. Binding when it merges.
 
 ---
 
@@ -679,7 +678,7 @@ Full research, prior art and sources: `docs/STRETCH_GOALS.md`. Summary:
 | Owner | Siddharth (Track B) | Vishnu (Track C), runs on Siddharth's GPU | Vishnu (Track C); risk prior from Revanth |
 | Closest prior art | Detector-based origin cleaning prevents collapse (EMNLP 2025, 2502.15654); attribution + removal + retrain for *safety* degradation (2610.37481); influence fragile, repr-tracing strong (2409.19998, 2510.02334) | Proxies rank *useful* data for pretraining (ICLR 2026, 2512.24503); *forgetting* extrapolates across scale (2502.06042); TuneAhead predicts a fine-tuning score pre-hoc (ICML 2026, 2606.17660) | "When Rank Rises" (2610.09647): CUSUMs, union-bound FA on 2 seeds, leads 1/9, false-alarms 3/3; trajectory-level split conformal for diffusion memorization (2610.34617) |
 | What's new for us | Collapse damage with ground-truth labels and measured dose-response recovery; **head-to-head harm vs origin cleaning** (2502.15654 is a required baseline) | Forecasting *contamination-caused* damage from a smaller model, with a calibrated interval | *Applying* max-over-trajectory split conformal to LM training (calibrated on enough healthy runs); recursive-synthetic collapse; dataset-risk prior. The guarantee itself is not new (2026-11-02 search, #22) |
-| **Gate (PROPOSED: confirm at CP0)** | Harm-guided recovers ≥ 10 pp more than random at ratio 0.5 on ≥ 2 of 3 collapse types, every seed | Spearman ρ ≥ 0.7 proxy vs target damage, bootstrap CI excludes 0 | At FA 5%: alarm before the held-out-loss breach on ≥ 50% of collapsing runs; observed FA ≤ 10% on held-out healthy runs. Exact rule, run sets and the "breach" definition: `configs/x3.yaml` (`confirmed: false` until CP0) |
+| **Gate (CONFIRMED 2026-11-08)** | Harm-guided recovers ≥ 10 pp more than random at ratio 0.5 on ≥ 2 of 3 collapse types, every seed. **Secondary (D10):** harm vs origin cleaning, reported whatever the result | Spearman ρ ≥ 0.7 proxy vs target damage, bootstrap CI excludes 0 | At FA 5%: alarm before the held-out-loss breach on ≥ 50% of collapsing runs; observed FA ≤ 10% on held-out healthy runs. Exact rule, run sets and the "breach" definition: `configs/x3.yaml` (`confirmed: true` since 2026-11-08) |
 | Cut-off | Pilot beats random by 2026-12-15, else report as negative | Target trainable by 2026-12-15, else drop | 2027-01-15 (ship callback even without guarantee) |
 
 **The committed core ships first.** If time runs short, a stretch goal is cut, never the
@@ -733,18 +732,32 @@ X2 subset.** Always state the expected runtime when booking.
 | D1 | Hidden holdout carved by **text hash** | #6; ids let duplicate lines straddle the split |
 | D2 | GATE 2 = pre-registered dose-response rule (monotone + above seed noise at 0.25) | #11, `configs/grid.yaml` `gate:` |
 | D3 | benchmark_near: no whole-text recasing; pools versioned | #13; recasing hid memorisation |
-| D4 | **Label for "degraded" (decide at CP0)**. Default: holdout ppl above own-seed ratio-0 + baseline spread | Same noise floor as GATE 2/3, no new threshold |
+| D4 | **Label for "degraded" (decided 2026-11-08: the default is kept)**: holdout ppl above own-seed ratio-0 + baseline spread. Caveat to state in the paper: the spread comes from 3 seeds | Same noise floor as GATE 2/3, no new threshold |
 | D5 | `keep_models: true`; checkpoints live under `data/models/` on the run machine | White-box, X1 |
 | D6 | **UI = React + TypeScript + Vite + TanStack + Tailwind tokens + Radix + Observable Plot; API = FastAPI. No Streamlit/Gradio** | Product-grade UI is a deliverable (§8.6) |
 | D7 | WikiText GATE 3 results are **exploratory**. Confirmatory GATE 3 on TinyStories with a rule fixed at CP0 | 2026-10-31: GATE 3 not evaluable (no negatives); anisotropy fell, against the pre-registered +1 direction |
 | D8 | Stretch X1–X3 adopted with gates and cut-offs (§11) | 2026-10-31 |
+| D10 | **X1 secondary comparison (decided 2026-11-08).** The gate stays harm-vs-random. Pre-registered secondary, reported whatever the outcome: harm-guided vs origin cleaning (`risk_reflm`) recovery on every cell, with a bootstrap CI. Before the full X1 grid (B9): benchmark_near is scored by **benchmark-item perplexity**, not holdout recovery, and `risk_knn` is added as a strategy | PR #122 pilot: origin cleaning ties or beats harm; benchmark_near holdout recovery is meaningless (0.21 ppl denominator); Drayson et al. (EMNLP 2025) |
+| D11 | **X2 target model: Pythia-410M (decided 2026-11-08)**, plain LoRA on the 4 GB card; Qwen2.5-0.5B peaked at 6.5 GB and would need 4-bit QLoRA. The 36-row subset is trained (`reports/x2/`, PR #127); its analysis (#39) follows the X2 rule in §11 | measured 2026-11-08 |
+| D12 | **Novelty claims are the #112 wording** (`docs/STRETCH_GOALS.md`): core = contamination-caused degradation with conformal sets on a ground-truth testbed; X1 = harm vs origin head-to-head; X2 = contamination damage with a calibrated interval; X3 = application of the guarantee to LM training. H2 is not claimed until shown | #112 |
 | D9 | **Heading lines are kept**: the normalizer never drops `= … =` lines, for WikiText or new datasets | #60, 2026-11-03; the grid's 20–150 word window already drops all but 9 of WikiText's 6831 heading rows, so the choice barely touches a training set; one rule for every dataset, no fingerprint change, and the text-hash holdout (D1) keeps repeated headings on one side. A dataset without `min_words` would get them back (~¼ of WikiText rows) |
 
-### 13.3 GATE 3 confirmatory rule (PROPOSED: confirm at CP0, merge before TinyStories runs)
-Proposed: signals are **two-sided** (direction learned on WikiText, fixed for TinyStories:
-anisotropy −1). Negatives = `human_control` trajectories. Pass = at least one signal beats
-the permutation baseline at Bonferroni α = 0.05 *and* has median lead > 0 stages at false-alarm
-rate ≤ 5%. Fill in exact numbers at CP0, then **don't change them**.
+### 13.3 GATE 3 confirmatory rule (CONFIRMED 2026-11-08; binding when this merges)
+Evaluated on the TinyStories grid (`reports/grid_tinystories/`) with
+`python -m src.evaluation.earlywarning --config configs/earlywarning_tinystories.yaml`.
+- **Stages:** the grid's ratio ladder 0, 0.05, 0.1, 0.25, 0.5, 0.75, 1 (the finer low ratios give
+  onsets that land after stage 1; 0.75 is in the grid and is kept, so as not to drop data).
+- **Signals:** the six white-box signals, **two-sided**: risk at stage k is `|x_k - x_0|`
+  (`direction: 0`). The WikiText anisotropy direction is not imposed (D7: exploratory).
+- **Negatives:** the `human_control` trajectories. **Onset:** the first ratio whose holdout
+  perplexity exceeds the same seed's ratio-0 run by more than the ratio-0 spread (GATE 2's floor).
+- **Pass:** at least one signal has a permutation p below Bonferroni alpha 0.05/6 **and** a
+  *median* lead > 0 stages at a false-alarm rate <= 5% among never-collapsing trajectories.
+  Numbers: `configs/earlywarning_tinystories.yaml`. Don't change them.
+- **Disclosure:** the TinyStories grid (PR #126) ran on 2026-11-08 *before* this rule merged,
+  because the run was prepared in advance. Its GATE 3 output was not computed, and its
+  `summary.json` GATE 2 line was not read, before the rule was fixed. GATE 2 is the unchanged
+  D2 rule. Nothing in this rule was chosen after looking at TinyStories results.
 
 ---
 

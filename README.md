@@ -184,7 +184,7 @@ fixed before its results existed ([TRD §11](docs/TRD.md#11-gono-go-gates), HAND
 | GATE 3 | A white-box signal warns before collapse | **Failed (exploratory)** | Structural, see below; confirmatory run on TinyStories ([#73](https://github.com/SheeshDarth/OriginX-T/pull/73)) |
 | X1 | Harm-guided repair beats random by ≥ 10 pts | Not started | Fixtures only ([#106](https://github.com/SheeshDarth/OriginX-T/pull/106)) |
 | X2 | Small-model canary predicts a bigger model's damage (ρ ≥ 0.7) | Not started | Needs Siddharth's GPU |
-| X3 | Live alarm before the breach at a calibrated 5% FA | **Built, verdict after CP0** | Monitor, data, pre-registered plan ([#98](https://github.com/SheeshDarth/OriginX-T/pull/98), [#110](https://github.com/SheeshDarth/OriginX-T/pull/110)) |
+| X3 | Live alarm before the breach at a calibrated 5% FA | **Rule confirmed 2026-11-08, verdict pending** | Monitor, data, pre-registered plan ([#98](https://github.com/SheeshDarth/OriginX-T/pull/98), [#110](https://github.com/SheeshDarth/OriginX-T/pull/110)) |
 
 **Risk model (WikiText, 2026-11-01, [#105](https://github.com/SheeshDarth/OriginX-T/pull/105)).**
 Leave-one-type-out AUROC **0.84** [0.72, 0.94], ECE 0.22. The conformal sets **under-cover**:
@@ -207,8 +207,7 @@ collapse signature, does *not* separate generated text from healthy text at this
 the white-box signals every 10 steps is bit-for-bit neutral: of the 67 logged runs, the 24
 that are grid cells reproduce the grid's holdout perplexity exactly (the rest use new seeds). Within a run the holdout loss never rises: contaminated runs just improve less than
 healthy ones, so damage is a gap, not a turn. Anisotropy separates by step 20 of 125. The
-Gate X3 rule is pre-registered in `configs/x3.yaml`, to be confirmed at CP0 before any
-verdict.
+Gate X3 rule is confirmed in `configs/x3.yaml` (2026-11-08); the verdict is computed next.
 
 **Next: CP1 (Fri 2026-11-20).** TinyStories prep (#58, Siddharth) unblocks the second grid,
 GATE 1 and the confirmatory GATE 3; X1's pilot starts; X2 needs the target model on
