@@ -95,7 +95,8 @@ error rises before accuracy falls (#13), the closest prior work to our early-war
 but with one hand-picked metric and no guarantee. Cleaning by origin already works: a
 machine-generated-text detector with importance resampling prevents collapse on GPT-2 and
 SmolLM2 and can beat purely human data (#25, [A6]). This is why origin cleaning is a required
-baseline for our harm-based repair, and in our pilot it is hard to beat.
+baseline for our harm-based repair, and in our pilot it is hard to beat. An epidemiological model of contamination likewise finds detection-based
+filtering among the most effective interventions (arXiv 2606.05168).
 
 **Benchmark contamination.** Surveys find no detector reliable across contamination tiers
 (#18, #19, #21). Rephrased copies evade n-gram decontamination (#23), black-box tests exist for
@@ -105,12 +106,15 @@ up in perplexity on the leaked items rather than in the holdout.
 
 **Provenance detection.** Detectors are brittle under decoding changes and attacks (#26) and a
 simple fine-tuned baseline is competitive while distribution shift stays unsolved (#28).
+SynthSentry scores an unlabeled corpus for synthetic contamination before training from
+diversity and perplexity-spread measures, but does not tie the score to damage (arXiv 2609.12353).
 Our feature suite does not try to out-detect them. It asks whether dataset-level signals
 predict *damage*, and finds that a single reference-LM loss feature carries most of the signal.
 
 **Data attribution and repair.** Influence functions are fragile for LLMs and a representation
 baseline can beat them ([A1], [A2]); LoRA-gradient selection is cheap (LESS), and attribution-guided
-removal followed by retraining exists for *safety* degradation ([A7], [A8], [A9]). Our X1
+removal followed by retraining exists for *safety* degradation ([A7], [A8], [A9]); attribution also removes the effect only unreliably in a subliminal-learning
+test (arXiv 2609.20027). Our X1
 applies the recipe to collapse and contamination damage with ground-truth labels and compares it
 head to head with origin cleaning.
 
@@ -122,15 +126,18 @@ rank datasets differently from their target unless the learning rate is reduced 
 
 **Calibration and early warning.** Split conformal prediction gives distribution-free coverage
 (Angelopoulos and Bates, 2021) and trajectory-level guarantees exist (arXiv 2610.34617, for
-diffusion models), so ours is an application, not a novelty claim. Discrete-time survival models
+diffusion models), so ours is an application, not a novelty claim. Sequential conformal change detectors with
+optimal delay (arXiv 2609.27179) are the stronger baseline for the alarm and a natural extension. Discrete-time survival models
 (#29) and time-aware state-space models (#30) are the planned extensions and are gated on the
 risk model being sound (README feature 6).
 
 **Gap.** No system we found takes a dataset as input and returns a calibrated, contamination-
 specific degradation risk, nor a live alarm with a stated false-alarm rate for recursive
 collapse (`docs/LITERATURE_SURVEY.md` §5; `STRETCH_GOALS.md`). We re-ran the search on
-2026-11-02 and narrowed the claims accordingly; it is not a systematic review, and it should
-be repeated on Semantic Scholar for anything dated after that day before submission. **TODO.**
+2026-11-02 and again on 2026-11-09 (`docs/LITERATURE_REFRESH.md`): nothing dated after the first
+search was found and the claims stand, though a pre-training contamination score exists
+(SynthSentry) and our claim is the calibrated *damage* prediction. It is not a systematic review;
+repeat it on Semantic Scholar shortly before submission.
 
 ## 3. Limitations (shared)
 These are the cross-cutting limits. Each track section lists its own.
@@ -177,6 +184,6 @@ finer-grained alarm registered as a new experiment.
 - [x] Abstract and conclusion (2026-11-09, from the CP0 verdicts; revisit after X1's full grid).
 - [ ] Convert survey numbers and stretch-goal keys to one bibliography; verify every entry
   marked preprint (the survey's own honesty note).
-- [ ] Repeat the literature search for work after 2026-11-02.
+- [x] Repeat the literature search for work after 2026-11-02 (2026-11-09, `docs/LITERATURE_REFRESH.md`; repeat once more before submission).
 - [ ] Update §1 "what we found" after each pending gate; every number must trace to a committed
   `reports/` file.
