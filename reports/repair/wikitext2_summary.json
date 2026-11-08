@@ -1,0 +1,32 @@
+{
+  "pilot": {
+    "margins": {
+      "synthetic_r0.5_s0": 0.36434,
+      "recursive_r0.5_s0": 0.39169
+    },
+    "status": "go"
+  },
+  "gate_x1": {
+    "margins": {
+      "synthetic": {
+        "0": 0.36434,
+        "1": null,
+        "2": null
+      },
+      "recursive": {
+        "0": 0.39169,
+        "1": null,
+        "2": null
+      },
+      "paraphrased": {
+        "0": null,
+        "1": null,
+        "2": null
+      }
+    },
+    "passing_types": [],
+    "status": "not evaluable",
+    "rule": "harm_guided - random recovery >= 0.1 at ratio 0.5 on >= 2 of ['synthetic', 'recursive', 'paraphrased'], every seed"
+  },
+  "h5": {}
+}
