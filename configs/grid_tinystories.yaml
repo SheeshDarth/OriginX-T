@@ -1,0 +1,89 @@
+# TinyStories fine-tuning grid (C6, #29): the second dataset for GATE 1 and the confirmatory
+# GATE 3. Same recipe as configs/grid.yaml; only the data, the output directories and the
+# ratios differ.
+#
+#   python -m src.finetune.grid --config configs/grid_tinystories.yaml
+#
+# RATIOS: the WikiText ratios plus 0.05 and 0.1, so that contamination onset can land after
+# the first stage (CP0 decision 1, options A/C in docs/CP0_DECISIONS.md). Extra ratios do not
+# change GATE 2, which is computed on the same rule. NO GATE 2 or GATE 3 result for this
+# grid is to be looked at before the CP0 call fixes the confirmatory rule (HANDBOOK 13.3).
+#
+# Data: data/processed/tinystories_* from normalize_corpora + holdout (B3, #58; hashes in the
+# #58 thread, regenerated identically on 2026-11-08). The benchmark draw (200 items, 20-150
+# words, rng "benchmark") contains none of the 5 hidden-holdout stories that the Hub's
+# validation split repeats (#58). Changing n_benchmark / min_words / max_words needs a
+# check_leakage run on the picked items first.
+
+seeds: [0, 1, 2]
+ratios: [0.0, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0]
+types: [synthetic, recursive, paraphrased, benchmark_near, human_control]
+share_baseline: true
+
+device: cuda            # "cpu" works for the smoke config only
+base_model: distilgpt2
+# Writes the Gen-1 text for the synthetic and recursive contamination, and the
+# paraphrased contamination. Pretrained, never fine-tuned itself.
+generator_model: distilgpt2
+
+# "recursive" contamination is the collapse spike's recipe: a model fine-tuned on
+# Gen-1 writes Gen-2, a model fine-tuned on Gen-2 writes Gen-3, and so on. This is
+# the generation the contamination ends at (2 = Gen-2, must be >= 2). Each extra
+# generation costs one more fine-tune per seed. Intermediate checkpoints go to
+# models_dir and are deleted unless keep_models is true.
+recursive_depth: 2
+
+data:
+  kept: data/processed/tinystories_train_kept.jsonl
+  holdout: data/processed/tinystories_train_hidden_holdout.jsonl
+  benchmark: data/processed/tinystories_validation.jsonl   # source of the leaked items
+  n_train: 1000
+  n_holdout: 200
+  n_benchmark: 200
+  min_words: 20         # skip headings and fragments
+  max_words: 150        # keep prompts + continuations inside the context window
+
+benchmark_near:
+  exact_fraction: 0.3   # share of leaked items that are verbatim copies
+
+# Same recipe as the collapse spike, so the ratio-0 cells land on its Gen-0 numbers.
+train:
+  epochs: 1
+  lr: 2.0e-4
+  batch_size: 8
+  max_len: 256
+  lora_r: 8
+
+generate:
+  max_new_tokens: 96
+  batch_size: 16        # texts per GPU call; lower it if generation runs out of memory
+
+tracking:
+  backend: mlflow                       # "none" to skip logging
+  uri: sqlite:///mlruns/mlflow.db       # local file, git-ignored; view: mlflow ui --backend-store-uri <uri>
+  experiment: origin-t-grid-tinystories
+
+pools_dir: data/processed/grid_tinystories_pools    # generated contamination, reused on resume; git-ignored
+models_dir: data/models/grid_tinystories            # git-ignored
+keep_models: true                       # checkpoints are kept for the white-box signals: ~330MB per cell, ~17GB in all, under models_dir above (put it on a drive with space)
+output_dir: reports/grid_tinystories                # results.jsonl + summary.json, committed
+figure: reports/figures/collapse_curves_tinystories.png
+
+# GATE 2, pre-registered: this rule was fixed before the full grid's results were
+# seen, and is computed from results.jsonl alone (`--summarize-only` re-applies it
+# to finished results). Changing it after looking at results needs a note in the
+# report. A collapse type "degrades" when BOTH hold:
+#   (a) dose-response: the mean hidden-holdout perplexity across seeds is
+#       non-decreasing over the ratios, allowing a relative drop of at most
+#       monotone_tolerance between neighbouring ratios;
+#   (b) above noise at low dose: at low_dose_ratio, every seed's holdout perplexity
+#       exceeds that seed's own ratio-0 baseline by more than the spread (max - min)
+#       of the ratio-0 baselines across seeds, in perplexity points.
+# GATE 2 passes when every type in collapse_types degrades. It is "not evaluable",
+# never "passed", while any of their cells (all ratios, all seeds) is missing.
+# benchmark_near is not gated: it is reported as the change in mean benchmark-item
+# perplexity against ratio 0, where a negative change means memorisation.
+gate:
+  collapse_types: [synthetic, recursive, paraphrased]
+  monotone_tolerance: 0.005
+  low_dose_ratio: 0.25

@@ -572,7 +572,7 @@ alarm and the canary.
       never collapse, which gives GATE 3 its negatives. Done (#27): `grid.human_control_pool`.
       Disjointness is by normalized text fingerprint, the pool's rows have `n_contaminated` 0,
       and `validate_gate` refuses it as a GATE 2 collapse type. Fingerprints are unchanged.
-- [ ] `configs/grid_tinystories.yaml` → `reports/grid_tinystories/`: 5 types (4 + control) ×
+- [x] `configs/grid_tinystories.yaml` → `reports/grid_tinystories/`: 5 types (4 + control) ×
       5 ratios × 3 seeds. Estimated ~1.5–2 h on the RTX 2050 (cells ~75 s each on WikiText;
       verify with the smoke config first). Keep checkpoints, then white-box on them.
 - [ ] Also run `human_control` on WikiText (new config `grid_wikitext_control.yaml`, new
