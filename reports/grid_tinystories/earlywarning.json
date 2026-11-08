@@ -1,0 +1,161 @@
+{
+  "alpha_adjusted": 0.008333333333333333,
+  "never_collapse": 3,
+  "signals": {
+    "anisotropy_last": {
+      "auroc": 0.16666666666666666,
+      "auroc_ci": [
+        0.0,
+        0.42857142857142855
+      ],
+      "early_warning": {
+        "detected": 1,
+        "detection_rate": 0.08333333333333333,
+        "false_alarm_rate": 0.0,
+        "leads": [
+          1
+        ],
+        "mean_lead": 1.0,
+        "median_lead": 1,
+        "n_collapsing": 12,
+        "threshold": 0.009577201634895838
+      },
+      "n_collapsing": 12,
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9664033596640336,
+      "skipped": [],
+      "status": "ok",
+      "warns": false
+    },
+    "dead_fraction_mean": {
+      "auroc": 0.2638888888888889,
+      "auroc_ci": [
+        0.057692307692307696,
+        0.5384615384615384
+      ],
+      "early_warning": {
+        "detected": 0,
+        "detection_rate": 0.0,
+        "false_alarm_rate": 0.0,
+        "leads": [],
+        "mean_lead": null,
+        "median_lead": null,
+        "n_collapsing": 12,
+        "threshold": 0.00048828125
+      },
+      "n_collapsing": 12,
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.8798120187981202,
+      "skipped": [],
+      "status": "ok",
+      "warns": false
+    },
+    "delta_rel_norm": {
+      "auroc": 0.5555555555555556,
+      "auroc_ci": [
+        0.21428571428571427,
+        0.9
+      ],
+      "early_warning": {
+        "detected": 4,
+        "detection_rate": 0.3333333333333333,
+        "false_alarm_rate": 0.0,
+        "leads": [
+          2,
+          1,
+          1,
+          1
+        ],
+        "mean_lead": 1.25,
+        "median_lead": 1.0,
+        "n_collapsing": 12,
+        "threshold": 0.0001235168085141113
+      },
+      "n_collapsing": 12,
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.4173582641735826,
+      "skipped": [],
+      "status": "ok",
+      "warns": false
+    },
+    "eff_rank_last": {
+      "auroc": 0.25,
+      "auroc_ci": [
+        0.0,
+        0.7142857142857143
+      ],
+      "early_warning": {
+        "detected": 0,
+        "detection_rate": 0.0,
+        "false_alarm_rate": 0.0,
+        "leads": [],
+        "mean_lead": null,
+        "median_lead": null,
+        "n_collapsing": 12,
+        "threshold": 3.515366369364415
+      },
+      "n_collapsing": 12,
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9133086691330867,
+      "skipped": [],
+      "status": "ok",
+      "warns": false
+    },
+    "part_ratio_last": {
+      "auroc": 0.08333333333333333,
+      "auroc_ci": [
+        0.0,
+        0.35714285714285715
+      ],
+      "early_warning": {
+        "detected": 0,
+        "detection_rate": 0.0,
+        "false_alarm_rate": 0.0,
+        "leads": [],
+        "mean_lead": null,
+        "median_lead": null,
+        "n_collapsing": 12,
+        "threshold": 0.06693468753440146
+      },
+      "n_collapsing": 12,
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9916008399160084,
+      "skipped": [],
+      "status": "ok",
+      "warns": false
+    },
+    "stable_rank_attn": {
+      "auroc": 0.08333333333333333,
+      "auroc_ci": [
+        0.0,
+        0.2727272727272727
+      ],
+      "early_warning": {
+        "detected": 1,
+        "detection_rate": 0.08333333333333333,
+        "false_alarm_rate": 0.0,
+        "leads": [
+          1
+        ],
+        "mean_lead": 1.0,
+        "median_lead": 1,
+        "n_collapsing": 12,
+        "threshold": 0.02845830116284276
+      },
+      "n_collapsing": 12,
+      "n_never": 3,
+      "n_trajectories": 15,
+      "permutation_p": 0.9924007599240076,
+      "skipped": [],
+      "status": "ok",
+      "warns": false
+    }
+  },
+  "status": "failed",
+  "trajectories": 15
+}

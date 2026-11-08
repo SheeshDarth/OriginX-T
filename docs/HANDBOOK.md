@@ -576,8 +576,9 @@ alarm and the canary.
       verify with the smoke config first). Keep checkpoints, then white-box on them.
 - [ ] Also run `human_control` on WikiText (new config `grid_wikitext_control.yaml`, new
       output_dir), ~15 min, so WikiText's GATE 3 becomes evaluable as **exploratory**.
-- [ ] **GATE 3 confirmatory rule** (§13.3): written and merged at CP0, evaluated on TinyStories
-      at CP2.
+- [x] **GATE 3 confirmatory rule** (§13.3): merged at CP0 (#128), evaluated on TinyStories
+      2026-11-08: **FAILED** (`reports/grid_tinystories/earlywarning.json`). Gate X3: **FAILED**
+      (44% early alarms, 6% false alarms). Gate X2: **PASSED** (ρ 0.78, CI [0.51, 0.91]).
 
 ### 10.3 API (`dashboard/api/`), v1 frozen by CP0+5 days
 - [x] FastAPI + Pydantic v2 + uvicorn. Read-only routes over `reports/**` (§7.7), with an ETag

@@ -84,10 +84,14 @@ warn from; the three never-collapsing trajectories are the control arm. This doe
 signals carry no information: they separate the arms *at* onset (§3), in the wrong direction for
 the rule. We report the failure as written and do not re-score it with the new direction.
 
-**Confirmatory run, PENDING** (#35; CP0 decision 1). The proposed rule uses finer low ratios
-{0, 0.05, 0.1, 0.25, 0.5, 1}, two-sided signals, `human_control` negatives and Bonferroni
-α = 0.05, on TinyStories (the second dataset, #29), written into HANDBOOK §13.3 before the grid
-runs.
+**Confirmatory run: failed** (#35, `reports/grid_tinystories/earlywarning.json`). The rule
+(HANDBOOK §13.3, merged before the verdict) uses ratios {0, 0.05, 0.1, 0.25, 0.5, 0.75, 1},
+two-sided signals, `human_control` negatives, a median lead and Bonferroni α = 0.05/6, on
+TinyStories. Of 15 trajectories, 3 never collapse. No signal passes: AUROC 0.08-0.56 and
+permutation p 0.42-0.99 (best: `delta_rel_norm`, AUROC 0.56, p 0.42). Anisotropy, the signal
+that separated the arms on WikiText, has AUROC 0.17. We report it as written. The TinyStories
+grid itself ran before the rule merged (HANDBOOK §13.3 discloses this), but no GATE 3 output
+was read before then.
 
 ## 5. X3: a live alarm with a calibrated false-alarm rate
 **Question.** Can a monitor read signals *during* training and alarm before the damage is
@@ -114,13 +118,16 @@ anisotropy separates the arms by step 20 of 125.
    run's loss change is above the healthy band by the loss's own threshold.
 5. The alarm latches and runs live through `TrainLogger(monitor=...)`.
 
-**Gate X3** (`configs/x3.yaml`, PROPOSED until CP0): alarm strictly before the breach on ≥ 50% of
+**Gate X3** (`configs/x3.yaml`, confirmed 2026-11-08): alarm strictly before the breach on ≥ 50% of
 breaching runs, and an observed false-alarm rate ≤ 10% on 16 held-out healthy runs. The 18
 collapsing runs are synthetic, recursive and paraphrased at ratios 0.5 and 1.
 
-**Result: PENDING.** The command refuses to run until `gate.confirmed` is true, so no verdict
-exists and none is quoted here. To fill in from `reports/x3/`: early-alarm rate, median lead
-(steps), observed false-alarm rate, per-type split.
+**Result: failed** (`reports/x3/gate_x3.json`, WikiText). The alarm fired before the breach on
+8 of 18 collapsing runs (44%, bar 50%), with a median lead of 10 steps; 1 of 16 held-out healthy
+runs false-alarmed (6%, bar 10%, passed). Every miss is a ratio-1 run: its breach is at step 10,
+the first logged step, so no lead was possible at a 10-step log interval. The ratio-0.5 runs are
+warned early. The verdict stands as pre-registered. A finer log interval would be a new
+experiment with its own registered rule. TinyStories logs exist but have no registered X3 rule.
 
 **Relation to prior work.** A split-conformal guarantee on trajectories exists (arXiv
 2610.34617, diffusion models), so the guarantee is an application, not a novelty claim. What is
@@ -128,11 +135,13 @@ specific here is language-model fine-tuning, a calibration set of 20 healthy run
 method calibrates on 2 and false-alarms on 3 of 3 held-out healthy runs) and recursive-synthetic
 collapse (`docs/STRETCH_GOALS.md`, #112).
 
-## 6. X2: does a small model's damage predict a bigger one's? (PENDING)
-Proxy: the existing DistilGPT-2 runs, plus a reduced-learning-rate variant. Target: Pythia-410M
-or Qwen2.5-0.5B on 4 types × ratios {0, 0.5, 1} × 3 seeds. Gate: Spearman ρ ≥ 0.7 with a
-bootstrap CI that excludes 0, by 2026-12-15, else X2 is dropped and scale moves to the
-limitations. Not started: it needs the target model and GPU slots (CP0 decision 5).
+## 6. X2: does a small model's damage predict a bigger one's? (passed)
+Proxy: the DistilGPT-2 WikiText grid. Target: Pythia-410M, plain LoRA on the same pools
+(`pools_from`), 4 types × ratios {0, 0.5, 1} × 3 seeds (`reports/x2/`). Damage is holdout
+perplexity over the same seed's ratio-0 perplexity, minus 1. **Result: Spearman ρ = 0.78,
+95% bootstrap CI [0.51, 0.91] on 24 matched pairs** (`reports/x2/gate_x2.json`; bar ρ ≥ 0.7
+with the CI above 0): passed. Caveats: the pairing rule was ours (the handbook did not fix it),
+dose drives much of the rank, and the reduced-learning-rate proxy was not run.
 
 ## 7. Infrastructure that makes the numbers traceable
 - **One config fingerprint** covers every key that changes a result, so results from two
@@ -150,8 +159,8 @@ limitations. Not started: it needs the target model and GPU slots (CP0 decision 
   20 calibration runs, but only for one dataset and one training recipe.
 - **One dataset so far.** Every Track C result is WikiText-2 until the TinyStories grid (#58,
   #29) runs; GATE 1 is *not evaluable* before then.
-- **GATE 3 failed on its pre-registered rule.** The anisotropy direction is exploratory and the
-  confirmatory run is pending.
+- **GATE 3 failed twice:** on its WikiText rule and on the confirmatory TinyStories rule. The
+  signals separate the arms at onset but give no early warning on the ratio axis.
 - **One epoch, LoRA.** Full fine-tuning or more epochs could change when the signals move.
 - **The loss never rises within a run**, so "breach" means "gap from healthy runs". That is a
   property of this recipe, and the alarm needs healthy reference runs to exist.
@@ -159,7 +168,7 @@ limitations. Not started: it needs the target model and GPU slots (CP0 decision 
 ## 9. Figures and tables for the merged draft
 - [x] Collapse curves (`reports/figures/collapse_curves.png`), white-box signals
   (`whitebox_signals.png`), GATE 0 spike (`collapse_spike.png`).
-- [ ] X3: signal trajectories with alarm and breach marked, and a lead-time histogram (after CP0
+- [ ] X3 (verdict is in): signal trajectories with alarm and breach marked, and a lead-time histogram (after CP0
   and `python -m src.evaluation.alarm`).
 - [ ] TinyStories curves and the confirmatory GATE 3 table (after #29).
 - [ ] X2: proxy-vs-target scatter with Spearman ρ (after #38-#39).
