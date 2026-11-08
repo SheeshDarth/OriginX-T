@@ -81,7 +81,7 @@ verbatim leakage (#24), and behavioural detection compares scores with a referen
 up in perplexity on the leaked items rather than in the holdout.
 
 **Provenance detection.** Detectors are brittle under decoding changes and attacks (#26) and a
-simple fine-tuned baseline is competitive while distribution shift stays unsolved (#27, #28).
+simple fine-tuned baseline is competitive while distribution shift stays unsolved (#28).
 Our feature suite does not try to out-detect them. It asks whether dataset-level signals
 predict *damage*, and finds that a single reference-LM loss feature carries most of the signal.
 
