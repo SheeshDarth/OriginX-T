@@ -1,0 +1,64 @@
+# X2 canary (C15, #38): the target model, trained on a SUBSET of the proxy grid's cells.
+#
+#   python -m src.finetune.grid --config configs/grid_x2.yaml
+#
+# Proxy = configs/grid.yaml (DistilGPT-2). The target trains on the proxy's exact datasets:
+# `pools_from` points at the proxy config and the grid refuses to generate its own pools, so
+# a difference in damage is the model's, not the data's. The subset is HANDBOOK 10.5:
+# 4 types x ratios {0, 0.5, 1} x 3 seeds (the ratio-0 run is shared: 27 fine-tunes).
+#
+# Target model: Pythia-410M. On the 4 GB RTX 2050 it fits with plain LoRA (2.7 GB peak at
+# batch 8, length 256; measured 2026-11-08). Qwen2.5-0.5B peaked at 6.5 GB, over the card,
+# so it would need 4-bit QLoRA (bitsandbytes is not pinned). The choice is on the CP0 sheet
+# (decision 5); no X2 result is to be analysed before that call (analysis is #39).
+
+pools_from: configs/grid.yaml
+seeds: [0, 1, 2]
+ratios: [0.0, 0.5, 1.0]
+types: [synthetic, recursive, paraphrased, benchmark_near]
+share_baseline: true
+
+device: cuda
+base_model: EleutherAI/pythia-410m
+generator_model: distilgpt2     # unused (pools come from the proxy); kept so the config parses
+recursive_depth: 2
+
+data:
+  kept: data/processed/wikitext2_train_kept.jsonl
+  holdout: data/processed/wikitext2_train_hidden_holdout.jsonl
+  benchmark: data/processed/wikitext2_validation.jsonl
+  n_train: 1000
+  n_holdout: 200
+  n_benchmark: 200
+  min_words: 20
+  max_words: 150
+
+benchmark_near:
+  exact_fraction: 0.3
+
+train:
+  epochs: 1
+  lr: 2.0e-4
+  batch_size: 8
+  max_len: 256
+  lora_r: 8
+
+generate:
+  max_new_tokens: 96
+  batch_size: 16
+
+tracking:
+  backend: mlflow
+  uri: sqlite:///mlruns/mlflow.db
+  experiment: origin-t-x2
+
+pools_dir: data/processed/grid_pools    # unused (pools_from wins)
+models_dir: data/models/x2
+keep_models: false                      # X2 needs only the perplexities
+output_dir: reports/x2
+figure: reports/figures/x2_curves.png
+
+gate:
+  collapse_types: [synthetic, recursive, paraphrased]
+  monotone_tolerance: 0.005
+  low_dose_ratio: 0.5

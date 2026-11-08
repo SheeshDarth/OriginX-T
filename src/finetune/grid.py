@@ -819,6 +819,7 @@ def _train_all(
     done: dict[str, dict[str, Any]],
 ) -> None:
     """Wire the real models into ``run_grid`` and train every cell not yet done."""
+    import yaml
     from transformers.utils import logging as hf_logging
 
     hf_logging.set_verbosity_error()  # per-sample generation warnings drown the progress lines
@@ -831,7 +832,11 @@ def _train_all(
     bench_items = _pick(load_dataset(d["benchmark"]), d["n_benchmark"], lo, hi, random.Random("benchmark"))
     bench_texts = [s.response for s in bench_items]
     models_dir = Path(cfg["models_dir"])
-    pools_dir = Path(cfg["pools_dir"]) / fingerprint
+    # X2: a target-model grid trains on the proxy grid's exact datasets (`pools_from` is the
+    # proxy's config) and never generates its own, so the damage of the two is comparable.
+    pools_from = cfg.get("pools_from")
+    proxy = yaml.safe_load(Path(pools_from).read_text(encoding="utf-8")) if pools_from else cfg
+    pools_dir = Path(proxy["pools_dir"]) / config_fingerprint(proxy)
 
     @lru_cache(maxsize=None)
     def draw(seed: int) -> tuple[list[Sample], list[Sample]]:
@@ -847,6 +852,8 @@ def _train_all(
         path = pool_path(pools_dir, kind, seed)
         if path.exists():
             return load_dataset(path)
+        if pools_from:
+            raise FileNotFoundError(f"{path} is missing: pools_from forbids generating pools.")
         print(f"  generating {kind} contamination for seed {seed}", flush=True)
 
         def generator(model: str):  # fresh per use, so each pool is reproducible on its own
