@@ -259,6 +259,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/x2/canary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * X2 Canary
+     * @description The Gate X2 verdict and its matched proxy/target cells; 404 until X2 has run.
+     */
+    get: operations["x2_canary_v1_x2_canary_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/x3/monitor": {
     parameters: {
       query?: never;
@@ -410,6 +430,51 @@ export interface components {
       source: string;
       /** Split */
       split: string;
+    };
+    /**
+     * Canary
+     * @description Gate X2 (``src.evaluation.canary``): Spearman rho of proxy vs target damage, with its CI.
+     */
+    Canary: {
+      /** Ci */
+      ci: number[];
+      /** N Pairs */
+      n_pairs: number;
+      /** Pairs */
+      pairs: components["schemas"]["CanaryPair"][];
+      /** Rho */
+      rho: number;
+      /** Rho Min */
+      rho_min: number;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "passed" | "failed";
+    };
+    /**
+     * CanaryPair
+     * @description One matched cell: the proxy's and the target's damage (holdout ppl / the seed's ratio-0 ppl - 1).
+     */
+    CanaryPair: {
+      /** Proxy Damage */
+      proxy_damage: number;
+      /** Ratio */
+      ratio: number;
+      /** Seed */
+      seed: number;
+      /** Target Damage */
+      target_damage: number;
+      /**
+       * Type
+       * @enum {string}
+       */
+      type:
+        | "synthetic"
+        | "recursive"
+        | "paraphrased"
+        | "benchmark_near"
+        | "human_control";
     };
     /** ConformalCoverage */
     ConformalCoverage: {
@@ -1417,6 +1482,46 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TrainlogRow"][];
+        };
+      };
+      /** @description Not found, or not produced yet */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+      /** @description Invalid request parameters */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Problem"];
+          "application/problem+json": unknown;
+        };
+      };
+    };
+  };
+  x2_canary_v1_x2_canary_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Canary"];
         };
       };
       /** @description Not found, or not produced yet */

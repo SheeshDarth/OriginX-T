@@ -12,6 +12,7 @@ export type RiskEvaluation = S["RiskEvaluation"];
 export type TrainlogRow = S["TrainlogRow"];
 export type RunSummary = S["RunSummary"];
 export type AlarmMonitor = S["AlarmMonitor"];
+export type Canary = S["Canary"];
 export type Dataset = "wikitext2" | "tinystories";
 
 /** Also used directly by EventSource (SSE), which openapi-fetch does not cover. */

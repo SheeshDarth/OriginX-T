@@ -9,6 +9,7 @@ import { CommandPalette, type Command } from "./components/CommandPalette";
 import { TYPES } from "./components/charts";
 import { Audit } from "./routes/Audit";
 import { Bench } from "./routes/Bench";
+import { Canary } from "./routes/Canary";
 import { CellDetail } from "./routes/CellDetail";
 import { Curves } from "./routes/Curves";
 import { Monitor } from "./routes/monitor/Monitor";
@@ -20,6 +21,7 @@ const COMMANDS: Command[] = [
   { label: "Collapse curves", to: "/curves" },
   { label: "Audit a dataset", to: "/audit" },
   { label: "Live monitor (X3)", to: "/monitor" },
+  { label: "Canary (X2)", to: "/canary" },
   ...["gate_0", "gate_1", "gate_2", "gate_3", "x1", "x2", "x3"].map((id) => ({
     label: `Gate ${id.replace("gate_", "").toUpperCase()}`,
     to: "/",
@@ -64,6 +66,9 @@ const root = createRootRoute({
           <Link to="/monitor" className="text-muted [&.active]:text-fg">
             Live monitor
           </Link>
+          <Link to="/canary" className="text-muted [&.active]:text-fg">
+            Canary
+          </Link>
         </nav>
         <kbd className="ml-auto font-mono text-xs text-muted">Ctrl K</kbd>
       </header>
@@ -103,6 +108,11 @@ export const routeTree = root.addChildren([
     getParentRoute: () => root,
     path: "/monitor/$runId",
     component: Monitor,
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/canary",
+    component: Canary,
   }),
 ]);
 

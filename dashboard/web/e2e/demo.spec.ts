@@ -21,11 +21,13 @@ test("overview: the gate board shows the committed verdicts", async ({
   page,
 }) => {
   await page.goto("/");
-  const gate2 = page.getByRole("row", { name: /GATE 2: dose-response/ });
+  const gate2 = page.getByRole("row", {
+    name: /GATE 2: dose-response wikitext2/,
+  });
   await expect(gate2.getByText("passed")).toBeVisible();
   await expect(
     page
-      .getByRole("row", { name: /GATE 3: early warning/ })
+      .getByRole("row", { name: /GATE 3: early warning wikitext2/ })
       .getByText("exploratory"),
   ).toBeVisible();
   await noA11yViolations(page);
@@ -119,7 +121,7 @@ test("monitor: pick a logged run, replay it, read its signals", async ({
   await noA11yViolations(page);
 
   await page.getByLabel("Filter runs").fill("recursive_r1_s0");
-  await page.getByRole("link", { name: "recursive_r1_s0" }).click();
+  await page.locator('a[href="/monitor/wikitext2_recursive_r1_s0"]').click();
   await expect(page).toHaveURL(/\/monitor\/wikitext2_recursive_r1_s0$/);
   // a finished log replays all 14 rows, then the stream ends
   await expect(page.getByText(/14 rows, last step 125/)).toBeVisible();
@@ -130,5 +132,17 @@ test("monitor: pick a logged run, replay it, read its signals", async ({
   await expect(
     page.getByRole("row", { name: /Anisotropy, last layer/ }),
   ).toBeVisible();
+  await noA11yViolations(page);
+});
+
+test("canary: the X2 verdict and one dot per matched cell", async ({
+  page,
+}) => {
+  await page.goto("/canary");
+  await expect(page.getByText(/ρ = 0\.78 \[0\.51, 0\.91\]/)).toBeVisible();
+  await expect(page.getByText(/^passed \(bar/)).toBeVisible();
+  await expect
+    .poll(() => page.locator('figure svg [aria-label="dot"] path').count())
+    .toBe(24);
   await noA11yViolations(page);
 });

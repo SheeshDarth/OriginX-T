@@ -41,6 +41,7 @@ def root(tmp_path):
     monitor = Monitor.fit([quiet, quiet], ["anisotropy_last"]).calibrate([quiet] * 19, 0.05)
     (tmp_path / "reports/x3").mkdir(parents=True)
     (tmp_path / "reports/x3/monitor.json").write_text(json.dumps(monitor.to_dict()), encoding="utf-8")
+    shutil.copytree(REPO / "reports/x2", tmp_path / "reports/x2", ignore=shutil.ignore_patterns("results.jsonl"))
     key = {"dataset": "wikitext2", "cell": "synthetic_r0.5_s1"}
     _jsonl(tmp_path / "reports/features/wikitext2.jsonl", [{
         "schema": "features/1", **key, "type": "synthetic", "ratio": 0.5, "seed": 1, "n_samples": 1000,
@@ -77,6 +78,7 @@ URLS = {
     "/v1/runs/{run_id}/trainlog": "/v1/runs/wikitext2_synthetic_r1_s0/trainlog",
     "/v1/runs": "/v1/runs",
     "/v1/x3/monitor": "/v1/x3/monitor",
+    "/v1/x2/canary": "/v1/x2/canary",
     "/v1/bench/samples": "/v1/bench/samples?dataset=wikitext2&type=synthetic&ratio=0.5",
 }
 
@@ -108,6 +110,11 @@ def test_shapes_the_ui_relies_on(client):
     assert gates[("gate_2", "wikitext2")]["status"] == "passed"
     assert gates[("gate_3", "wikitext2")]["exploratory"] is True
     assert {g["id"] for g in gates.values()} == {"gate_0", "gate_1", "gate_2", "gate_3", "x1", "x2", "x3"}
+    x2 = gates[("x2", None)]  # the real verdict, from reports/x2/gate_x2.json
+    assert x2["status"] == "passed" and x2["details"]["n_pairs"] == 24
+    assert gates[("x3", None)]["status"] == "pending"  # no x3 verdict in the fixture root
+    canary = client.get("/v1/x2/canary").json()
+    assert canary["rho"] == x2["details"]["rho"] and len(canary["pairs"]) == canary["n_pairs"]
     g1 = gates[("gate_1", None)]  # from reports/risk/evaluation.json, one dataset so far
     assert g1["status"] == "not_evaluable" and g1["source"] == "reports/risk/evaluation.json"
     assert 0 < g1["details"]["auroc"] < 1 and g1["details"]["coverage_target"] == 0.9

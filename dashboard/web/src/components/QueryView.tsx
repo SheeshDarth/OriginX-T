@@ -16,6 +16,7 @@ export function QueryView<T>({
   if (query.isPending)
     return (
       <div
+        role="status"
         aria-label={`Loading ${label}`}
         className="h-24 animate-pulse rounded bg-border/50"
       />
