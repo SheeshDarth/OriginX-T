@@ -59,12 +59,13 @@ def risk_trajectories(
 
     Risk at stage k is ``direction * (x_k - x_0)``: how far the signal has moved,
     in the direction that means "worse" (+1 if it rises as the model degrades, -1
-    if it falls), from that trajectory's own ratio-0 value. It uses nothing from
-    later stages. Returns (keys, risks, onsets, skipped): a trajectory with any
+    if it falls), from that trajectory's own ratio-0 value. Direction 0 is two-sided:
+    ``|x_k - x_0|``, the move in either direction (the confirmatory rule, HANDBOOK 13.3).
+    It uses nothing from later stages. Returns (keys, risks, onsets, skipped): a trajectory with any
     stage lacking a fresh value for the signal is skipped, not patched.
     """
-    if direction not in (1, -1):
-        raise ValueError("direction must be +1 or -1")
+    if direction not in (1, -1, 0):
+        raise ValueError("direction must be +1, -1 or 0 (two-sided)")
     onsets = collapse_onsets(table)
     col = f"wb_{signal}"
     keys, risks, ons, skipped = [], [], [], []
@@ -74,7 +75,7 @@ def risk_trajectories(
             skipped.append(key)
             continue
         keys.append(key)
-        risks.append([direction * (v - values[0]) for v in values])
+        risks.append([abs(v - values[0]) if direction == 0 else direction * (v - values[0]) for v in values])
         ons.append(onsets[key])
     return keys, risks, ons, skipped
 
@@ -131,9 +132,10 @@ def evaluate_gate3(table: Sequence[Row], cfg: Mapping[str, Any]) -> dict:
 
     ``cfg`` is the config's ``gate3`` section: ``signals`` (white-box signal name
     -> direction, +1 if it rises as the model degrades, -1 if it falls), ``alpha``,
-    ``far``, ``n_boot``, ``n_perm``, ``seed``. A signal *warns* when its
-    permutation p-value is below ``alpha`` divided by the number of signals
-    (Bonferroni, since several are tried) and its mean lead is above zero. GATE 3
+    ``far``, ``n_boot``, ``n_perm``, ``seed``, and optionally ``lead_stat`` ("mean", the
+    default, or "median"). A signal *warns* when its permutation p-value is below
+    ``alpha`` divided by the number of signals (Bonferroni, since several are tried)
+    and its ``lead_stat`` lead is above zero. GATE 3
     passes when any signal warns; it is *not evaluable* when no signal could be
     evaluated, and fails otherwise. Never passed on missing evidence.
     """
@@ -149,7 +151,7 @@ def evaluate_gate3(table: Sequence[Row], cfg: Mapping[str, Any]) -> dict:
         )
         result["n_trajectories"] = len(keys)
         result["skipped"] = [list(k) for k in skipped]
-        lead = (result.get("early_warning") or {}).get("mean_lead")
+        lead = (result.get("early_warning") or {}).get(f"{cfg.get('lead_stat', 'mean')}_lead")
         result["warns"] = bool(
             result["status"] == "ok" and result["permutation_p"] < adjusted and lead is not None and lead > 0
         )

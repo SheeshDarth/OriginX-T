@@ -1,0 +1,26 @@
+# Confirmatory GATE 3 on TinyStories (HANDBOOK 13.3, CP0 decision 1, option C).
+#
+#   python -m src.evaluation.earlywarning --config configs/earlywarning_tinystories.yaml
+#
+# THE RULE, fixed 2026-11-08 before this was computed. Never change it.
+# Two-sided: direction 0 means risk = |x_k - x_0|. Pass needs a signal with permutation p below
+# alpha/6 and a MEDIAN lead > 0 stages at a false-alarm rate <= far.
+
+grid_results: reports/grid_tinystories/results.jsonl
+whitebox_results: reports/grid_tinystories/whitebox.jsonl
+output_dir: reports/grid_tinystories
+
+gate3:
+  signals:
+    eff_rank_last: 0
+    part_ratio_last: 0
+    anisotropy_last: 0
+    dead_fraction_mean: 0
+    stable_rank_attn: 0
+    delta_rel_norm: 0
+  alpha: 0.05
+  far: 0.05
+  lead_stat: median
+  n_boot: 1000
+  n_perm: 10000
+  seed: 0
