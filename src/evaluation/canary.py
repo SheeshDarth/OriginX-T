@@ -10,8 +10,6 @@ import argparse
 import json
 from pathlib import Path
 
-import numpy as np
-from scipy.stats import spearmanr
 
 
 def damage(path: str) -> dict[tuple, float]:
@@ -22,6 +20,9 @@ def damage(path: str) -> dict[tuple, float]:
 
 
 def verdict(proxy: dict, target: dict, rho_min=0.7, n_boot=10000, seed=0) -> dict:
+    import numpy as np  # lazy: CI installs neither numpy nor scipy
+    from scipy.stats import spearmanr
+
     keys = sorted(set(proxy) & set(target))
     x = np.array([proxy[k] for k in keys])
     y = np.array([target[k] for k in keys])

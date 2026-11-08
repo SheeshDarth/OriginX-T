@@ -1,4 +1,8 @@
-from src.evaluation.canary import verdict
+import pytest
+
+pytest.importorskip("scipy")  # not in the CI install
+
+from src.evaluation.canary import verdict  # noqa: E402
 
 
 def test_a_monotone_target_passes_and_a_reversed_one_fails():
