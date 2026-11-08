@@ -1,5 +1,6 @@
 """Tests for the X1 harm scores (HANDBOOK §9.3, B7)."""
 
+import json
 import random
 
 import pytest
@@ -8,7 +9,7 @@ from src.finetune.collapse import load_holdout
 from src.ingestion.loaders import write_jsonl
 from src.ingestion.schema import Sample
 from src.mitigation.harm import (
-    METHODS, lora_grad_harm, merge_rows, neg_cosine, repr_sim_harm, score_cell, target_texts,
+    METHODS, harm_report, lora_grad_harm, merge_rows, neg_cosine, repr_sim_harm, score_cell, target_texts,
 )
 
 KEYS = {"schema", "dataset", "cell", "sample_id", "method", "score", "higher_is", "true_source"}
@@ -101,3 +102,26 @@ def test_lora_grad_harm_does_not_depend_on_scoring_order(tiny_model):
 def test_repr_sim_harm_separates_texts_like_and_unlike_the_target(tiny_model):
     scores = repr_sim_harm(tiny_model, [A, B], [A], max_len=32, batch_size=2)
     assert scores[0] == pytest.approx(-1.0, abs=1e-6) and scores[1] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_harm_report_covers_every_scored_cell_not_only_the_latest_run(tmp_path):
+    def rows(method, cell, scores):
+        return [{"schema": "scores/1", "dataset": "toy", "cell": cell, "sample_id": f"{cell}-{i}", "method": method,
+                 "score": s, "higher_is": "worse", "true_source": "synthetic" if i % 2 else "human"}
+                for i, s in enumerate(scores)]
+
+    def write(method, data):
+        (tmp_path / method).mkdir(exist_ok=True)
+        (tmp_path / method / "toy.jsonl").write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
+
+    for m in METHODS:  # two cells scored in two separate runs: both must be in the report
+        write(m, rows(m, "a_r0.5_s0", [0.0, 1.0, 0.1, 0.9]) + rows(m, "b_r0.5_s0", [0.2, 0.8, 0.3, 0.7]))
+    write("risk_reflm", rows("risk_reflm", "a_r0.5_s0", [1.0, 0.0, 0.9, 0.1])
+          + rows("risk_reflm", "c_r0.5_s0", [0.0, 1.0, 0.0, 1.0]))  # c has no harm scores: left out
+    report = harm_report(tmp_path, "toy")
+    assert report["cells"] == ["a_r0.5_s0", "b_r0.5_s0"]
+    assert report["harm_lora_grad"]["pooled"]["auroc"] == 1.0 and report["harm_lora_grad"]["pooled"]["n"] == 8
+    assert report["risk_reflm"]["pooled"]["n"] == 4 and report["risk_reflm"]["pooled"]["auroc"] == 0.0
+    assert "risk_knn" not in report
+    saved = (tmp_path / "toy_harm_eval.json").read_bytes()
+    assert b"\r" not in saved and json.loads(saved) == report

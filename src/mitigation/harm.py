@@ -164,6 +164,22 @@ def score_cell(
     }
 
 
+def harm_report(root: str | Path, dataset: str) -> dict[str, Any]:
+    """AUROC of each harm method, and of Track C's ``risk_*`` on the same cells, over every cell
+    that has harm scores (not only the latest run's), written to ``<root>/<dataset>_harm_eval.json``."""
+    from ..features.scores import evaluate
+
+    root = Path(root)
+    paths = {m: root / m / f"{dataset}.jsonl" for m in (*METHODS, "risk_reflm", "risk_knn")}
+    rows = {m: _read(p) for m, p in paths.items() if p.exists()}
+    scored = {r["cell"] for m in METHODS for r in rows.get(m, [])}
+    report: dict[str, Any] = {m: evaluate([r for r in rs if r["cell"] in scored]) for m, rs in rows.items()}
+    report["cells"] = sorted(scored)
+    (root / f"{dataset}_harm_eval.json").write_text(json.dumps(report, indent=2) + "\n",
+                                                    encoding="utf-8", newline="\n")
+    return report
+
+
 def merge_rows(old: Sequence[Mapping[str, Any]], new: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """``old`` without the cells in ``new``, then ``new``: re-scoring a cell replaces its rows."""
     cells = {r["cell"] for r in new}
@@ -181,7 +197,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     import yaml
 
-    from ..features.scores import _write, evaluate
+    from ..features.scores import _write
     from ..features.suite import _device
     from ..finetune.collapse import training_text
     from ..finetune.grid import make_cells, training_set
@@ -221,14 +237,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     for method, rows in new.items():
         path = root / method / f"{args.dataset}.jsonl"
         _write(path, merge_rows(_read(path), rows))
-    scored = set(args.cells)
-    report: dict[str, Any] = {
-        m: evaluate([r for r in _read(root / m / f"{args.dataset}.jsonl") if r["cell"] in scored])
-        for m in (*METHODS, "risk_reflm", "risk_knn") if (root / m / f"{args.dataset}.jsonl").exists()
-    }
-    report["cells"] = sorted(scored)
-    (root / f"{args.dataset}_harm_eval.json").write_text(json.dumps(report, indent=2) + "\n",
-                                                         encoding="utf-8", newline="\n")
+    report = harm_report(root, args.dataset)
     for m, r in report.items():
         if m != "cells" and r["pooled"]:
             print(f"{m}: AUROC {r['pooled']['auroc']:.3f} [{r['pooled']['ci'][0]:.3f}, {r['pooled']['ci'][1]:.3f}]")
