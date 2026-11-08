@@ -28,5 +28,22 @@
     "status": "not evaluable",
     "rule": "harm_guided - random recovery >= 0.1 at ratio 0.5 on >= 2 of ['synthetic', 'recursive', 'paraphrased'], every seed"
   },
-  "h5": {}
+  "h5": {},
+  "benchmark_recovery": {},
+  "secondary": {
+    "comparison": "harm_guided - risk_guided",
+    "recovery": {
+      "per_cell": {
+        "recursive_r0.5_s0": -0.085137,
+        "synthetic_r0.5_s0": -0.120999
+      },
+      "n": 2,
+      "mean": -0.103068,
+      "ci95": [
+        -0.120999,
+        -0.085137
+      ],
+      "reading": "risk_guided better"
+    }
+  }
 }

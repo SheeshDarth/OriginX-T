@@ -20,6 +20,8 @@ Strategies (what is ranked worst first):
 - ``repr_sim``: ``harm_repr_sim``, the mandatory representation-similarity baseline.
 - ``risk_guided``: Track C's ``risk_reflm`` (low reference-model loss = looks generated).
   This is cleaning **by origin**, the comparison X1 has to win (STRETCH_GOALS X1).
+- ``knn_guided``: Track C's ``risk_knn`` (close to its nearest neighbours = redundant), added
+  before B9 (D10) because it is the score that finds ``benchmark_near`` copies.
 - ``perplexity_filter``: the classic quality filter, highest reference-model loss first
   (``-risk_reflm``).
 - ``random``: a seeded random choice, the floor Gate X1 is measured against.
@@ -50,6 +52,17 @@ checkpoints are deleted after scoring unless ``keep_models`` is set. The summary
 (``<output stem>_summary.json``) holds the pilot go/no-go and Gate X1 (§11, fixed before
 results): harm-guided recovery at least 10 points above random's at ratio 0.5 on at least
 2 of the 3 collapse types, on every seed.
+
+It also holds D10's pre-registered **secondary**, reported whatever the outcome: harm-guided
+minus origin cleaning (``risk_guided``) on every cell that has both, with a paired bootstrap
+95% CI of the mean over cells. Each cell is scored by the metric that measures its damage:
+``recovery`` for the collapse types; for ``benchmark_near``, whose holdout damage is within
+noise, **benchmark recovery**
+
+    benchmark_recovery = (bench_repaired - bench_contaminated) / (bench_clean - bench_contaminated)
+
+(memorisation lowers benchmark-item perplexity, so 1 = the leak is gone; None if the cell
+did not memorise). ``benchmark_recovery`` is listed for every strategy on those cells.
 """
 
 from __future__ import annotations
@@ -61,17 +74,22 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
-STRATEGIES = ("harm_guided", "repr_sim", "risk_guided", "random", "perplexity_filter", "oracle")
+STRATEGIES = ("harm_guided", "repr_sim", "risk_guided", "knn_guided", "random", "perplexity_filter",
+              "oracle")
 # strategy -> (scores/1 method it ranks by, sign); higher signed score = replaced first
 SCORED: dict[str, tuple[str, int]] = {
     "harm_guided": ("harm_lora_grad", 1),
     "repr_sim": ("harm_repr_sim", 1),
     "risk_guided": ("risk_reflm", 1),
+    "knn_guided": ("risk_knn", 1),
     "perplexity_filter": ("risk_reflm", -1),
 }
 GATE_MARGIN = 0.10      # Gate X1: harm-guided recovery - random recovery, in recovery units (10 points)
 GATE_MIN_TYPES = 2      # ... on at least this many collapse types, every seed
 RARE = "+rare"          # suffix of a strategy run with rare-cluster preservation (B10)
+BENCH_TYPE = "benchmark_near"   # scored by benchmark recovery, not holdout recovery (D10)
+SECONDARY = ("harm_guided", "risk_guided")   # D10: harm vs origin cleaning
+N_BOOT = 10_000
 
 
 def recovery(ppl_contaminated: float, ppl_clean: float, ppl_repaired: float) -> Optional[float]:
@@ -79,6 +97,29 @@ def recovery(ppl_contaminated: float, ppl_clean: float, ppl_repaired: float) -> 
     if ppl_contaminated <= ppl_clean:
         return None
     return round((ppl_contaminated - ppl_repaired) / (ppl_contaminated - ppl_clean), 6)
+
+
+def benchmark_recovery(bench_contaminated: float, bench_clean: float, bench_repaired: float) -> Optional[float]:
+    """D10: share of the benchmark memorisation undone. 1 = back to clean; None if nothing was memorised."""
+    if bench_contaminated >= bench_clean:
+        return None
+    return round((bench_repaired - bench_contaminated) / (bench_clean - bench_contaminated), 6)
+
+
+def cell_type(cell: str) -> str:
+    """``"benchmark_near_r0.5_s0"`` -> ``"benchmark_near"``."""
+    return cell.rsplit("_r", 1)[0]
+
+
+def bootstrap_mean_ci(values: Sequence[float], *, seed: str = "x1-secondary",
+                      n_boot: int = N_BOOT) -> Optional[list[float]]:
+    """Percentile 95% CI of the mean, resampling ``values`` with replacement. None for < 2 values."""
+    if len(values) < 2:
+        return None
+    rng = random.Random(seed)
+    n = len(values)
+    means = sorted(sum(rng.choice(values) for _ in range(n)) / n for _ in range(n_boot))
+    return [round(means[int(0.025 * n_boot)], 6), round(means[int(0.975 * n_boot) - 1], 6)]
 
 
 def rank(samples: Sequence[Any], strategy: str, scores: Optional[Mapping[str, Optional[float]]],
@@ -229,12 +270,42 @@ def run_repair(
     return rows
 
 
+def secondary(rows: Sequence[Mapping[str, Any]],
+              bench_rec: Mapping[str, Mapping[str, Optional[float]]]) -> dict[str, Any]:
+    """D10: harm-guided minus origin cleaning per cell, and the mean with a bootstrap CI.
+
+    Collapse cells use ``recovery`` and ``benchmark_near`` cells ``benchmark_recovery``; the
+    two are pooled separately, since they measure different damage.
+    """
+    harm, origin = SECONDARY
+    rec = {(r["cell"], r["strategy"]): r["recovery"] for r in rows}
+    groups: dict[str, dict[str, float]] = {}
+    for cell in sorted({r["cell"] for r in rows}):
+        bench = cell_type(cell) == BENCH_TYPE
+        get = (lambda s: bench_rec.get(cell, {}).get(s)) if bench else (lambda s: rec.get((cell, s)))
+        h, o = get(harm), get(origin)
+        if h is not None and o is not None:
+            groups.setdefault("benchmark_recovery" if bench else "recovery", {})[cell] = round(h - o, 6)
+    out: dict[str, Any] = {"comparison": f"{harm} - {origin}"}
+    for metric, diffs in groups.items():
+        vals = list(diffs.values())
+        ci = bootstrap_mean_ci(vals)
+        reading = ("not evaluable" if ci is None else f"{harm} better" if ci[0] > 0
+                   else f"{origin} better" if ci[1] < 0 else "no difference")
+        out[metric] = {"per_cell": diffs, "n": len(vals), "mean": round(sum(vals) / len(vals), 6),
+                       "ci95": ci, "reading": reading}
+    return out
+
+
 def summarize(rows: Sequence[Mapping[str, Any]], *, collapse_types: Sequence[str],
-              seeds: Sequence[int], pilot_cells: Sequence[str]) -> dict[str, Any]:
-    """Pilot go/no-go (harm-guided beats random on every pilot cell), Gate X1, and H5.
+              seeds: Sequence[int], pilot_cells: Sequence[str],
+              grid_rows: Optional[Mapping[str, Mapping[str, Any]]] = None) -> dict[str, Any]:
+    """Pilot go/no-go (harm-guided beats random on every pilot cell), Gate X1, H5 and D10.
 
     ``h5``: per strategy run with rare-cluster preservation, per cell, the change in recovery
-    and in distinct-2 that the rule made (``+rare`` minus without).
+    and in distinct-2 that the rule made (``+rare`` minus without). ``benchmark_recovery``
+    and ``secondary`` (D10) need ``grid_rows`` (the grid's results by cell id) for the
+    ``benchmark_near`` cells' contaminated and clean benchmark perplexity.
     """
     rec = {(r["cell"], r["strategy"]): r["recovery"] for r in rows}
     by_key = {(r["cell"], r["strategy"]): r for r in rows}
@@ -259,11 +330,21 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, collapse_types: Sequence[str
     passing = [t for t, by_seed in per_type.items()
                if all(m is not None and m >= GATE_MARGIN for m in by_seed.values())]
     gate = "not evaluable" if not complete else "passed" if len(passing) >= GATE_MIN_TYPES else "failed"
+
+    bench_rec: dict[str, dict[str, Optional[float]]] = {}
+    for r in rows:
+        cont = (grid_rows or {}).get(r["cell"])
+        if cell_type(r["cell"]) != BENCH_TYPE or cont is None:
+            continue
+        clean = next((g for g in grid_rows.values() if g["ratio"] == 0 and g["seed"] == cont["seed"]), None)
+        if clean is not None:
+            bench_rec.setdefault(r["cell"], {})[r["strategy"]] = benchmark_recovery(
+                cont["benchmark_ppl"], clean["benchmark_ppl"], r["benchmark_ppl"])
     return {"pilot": {"margins": pilot, "status": pilot_status},
             "gate_x1": {"margins": per_type, "passing_types": passing, "status": gate,
                         "rule": f"harm_guided - random recovery >= {GATE_MARGIN} at ratio 0.5 on >= "
                                 f"{GATE_MIN_TYPES} of {list(collapse_types)}, every seed"},
-            "h5": h5}
+            "h5": h5, "benchmark_recovery": bench_rec, "secondary": secondary(rows, bench_rec)}
 
 
 def _read(path: Path) -> list[dict[str, Any]]:
@@ -364,13 +445,18 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     rows = _read(out)
     summary = summarize(rows, collapse_types=grid["gate"]["collapse_types"], seeds=grid["seeds"],
-                        pilot_cells=cfg["pilot_cells"])
+                        pilot_cells=cfg["pilot_cells"],
+                        grid_rows={r["cell"]: r for r in _read(Path(grid["output_dir"]) / "results.jsonl")})
     out.parent.mkdir(parents=True, exist_ok=True)
     (out.parent / f"{out.stem}_summary.json").write_text(json.dumps(summary, indent=2) + "\n",
                                                          encoding="utf-8", newline="\n")
     for r in rows:
         print(f"{r['cell']:<22} {r['strategy']:<18} holdout {r['holdout_ppl']:.2f}  recovery {r['recovery']}")
     print(f"Pilot: {summary['pilot']['status']}   Gate X1: {summary['gate_x1']['status']}")
+    for metric, s in summary["secondary"].items():
+        if metric != "comparison":
+            print(f"D10 {summary['secondary']['comparison']} ({metric}): mean {s['mean']:+.3f} "
+                  f"CI {s['ci95']} over {s['n']} cells -> {s['reading']}")
     return 0
 
 
