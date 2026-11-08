@@ -129,10 +129,9 @@ the first logged step, so no lead was possible at a 10-step log interval. The ra
 warned early. The verdict stands as pre-registered. A finer log interval would be a new
 experiment with its own registered rule. TinyStories logs exist but have no registered X3 rule.
 
-**Relation to prior work.** A split-conformal guarantee on trajectories exists (arXiv
-2610.34617, diffusion models), so the guarantee is an application, not a novelty claim. What is
+**Relation to prior work.** A split-conformal guarantee on trajectories exists for diffusion models [jing26], so the guarantee is an application, not a novelty claim. What is
 specific here is language-model fine-tuning, a calibration set of 20 healthy runs (a comparable
-method calibrates on 2 and false-alarms on 3 of 3 held-out healthy runs) and recursive-synthetic
+method [wang26rank] calibrates on 2 and false-alarms on 3 of 3 held-out healthy runs) and recursive-synthetic
 collapse (`docs/STRETCH_GOALS.md`, #112).
 
 ## 6. X2: does a small model's damage predict a bigger one's? (passed)
