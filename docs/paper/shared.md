@@ -6,6 +6,23 @@ Every result cites the track section it comes from (`track_a.md`, `track_b.md`, 
 Claims follow the *revised* novelty wording of #112, not the first survey's. Entries marked
 TODO wait on results that do not exist yet; nothing here is a placeholder number.*
 
+## Abstract
+Teams learn whether a dataset will degrade their model only by fine-tuning on it. We build ORIGIN-T,
+a testbed with ground truth for this question: contaminated datasets (synthetic, recursive,
+paraphrased, benchmark-near and duplicate text mixed into human text at known ratios), fine-tuning
+runs over a ratio grid on two datasets (WikiText-2, TinyStories; DistilGPT-2 with LoRA), and
+pre-registered go/no-go gates fixed before their results existed. Damage is real and dose-dependent
+on both datasets, and caused by the contamination: on WikiText-2, hidden-holdout perplexity rises
+from 56.6 to 67.6 (synthetic) and 68.4 (recursive) at full contamination while a human-text control
+stays flat. A dataset-level risk model reaches a leave-one-type-out AUROC of 0.84, but its conformal
+sets under-cover (0.72 against 0.90) and it only ties a single reference-LM loss feature, so we do
+not claim that a multi-feature model beats a simple detector. White-box training signals separate
+contaminated from clean runs, yet the early-warning gate failed on both datasets, and a live,
+conformally calibrated alarm met its false-alarm bar (6%) but missed its early-alarm bar (44%
+against 50%). A small model's damage does predict a larger model's: Spearman rho 0.78, 95% CI
+[0.51, 0.91], against Pythia-410M. In a repair pilot, cleaning by origin matches harm-guided repair.
+We report the failed gates as written.
+
 ## 1. Introduction
 Fine-tuning a language model on a dataset is cheap to start and expensive to undo. Today a team
 learns whether a candidate dataset will degrade its model only by training on it, and a large
@@ -142,8 +159,22 @@ These are the cross-cutting limits. Each track section lists its own.
 - **Environment:** pools are not reproducible across GPUs (sampling), so the bench ships the
   data the grid trained on rather than a regeneration recipe.
 
-## 4. Open items for the merged draft
-- [ ] Abstract and conclusion (after CP0 verdicts, X3 and the TinyStories grid).
+## 4. Conclusion
+ORIGIN-T shows, on a testbed where the answer is known, that contamination causes dose-dependent
+damage that a small proxy model ranks well (X2 passed) and that a reference language model detects
+per sample. It also shows what does not yet work: the dataset-level risk model is not calibrated
+(0.72 coverage against 0.90) and does not beat its best single feature, white-box signals give no
+early warning on the contamination-ratio axis (GATE 3 failed twice), and the live alarm misses
+too many collapsing runs at the 10-step logging resolution (X3 failed), although its false-alarm
+rate held. In the repair pilot, origin cleaning is a strong baseline that harm-guided repair does
+not beat. We kept the rules fixed before the results and report the failures with the successes;
+that record, and the released data and code, are the contribution. The limits are scale (one
+82M model, one 410M target), one training recipe and weak synthetic generators. Next: the full
+repair grid with the harm-vs-origin comparison, more calibration data for the risk model, and a
+finer-grained alarm registered as a new experiment.
+
+## 5. Open items for the merged draft
+- [x] Abstract and conclusion (2026-11-09, from the CP0 verdicts; revisit after X1's full grid).
 - [ ] Convert survey numbers and stretch-goal keys to one bibliography; verify every entry
   marked preprint (the survey's own honesty note).
 - [ ] Repeat the literature search for work after 2026-11-02.
