@@ -43,7 +43,12 @@ is provisional until the TinyStories grid):
   feature (Track A; #105). We report H2 ("a multi-feature model beats a simple detector") as
   *not shown*.
 - White-box signals separate contaminated from clean runs (anisotropy falls, 0.935 → 0.902) but
-  the early-warning gate on the ratio axis failed, for a structural reason (Track C §3-4).
+  the early-warning gate failed on WikiText and again on the confirmatory TinyStories run
+  (AUROC 0.08-0.56; Track C §3-4).
+- The live alarm **failed its gate**: early on 8 of 18 collapsing runs (44%, bar 50%) with 6%
+  false alarms; the misses are runs already breached at the first logged step (Track C §5).
+- A small-model canary predicts a larger one's damage: Pythia-410M against the DistilGPT-2
+  proxy, Spearman ρ 0.78, CI [0.51, 0.91] (Track C §6; X2 passed).
 - In the repair pilot, harm-guided replacement beats random by 36-39 points, but **cleaning by
   origin ties or beats it** (Track B §5; #122).
 
@@ -54,7 +59,8 @@ could not find elsewhere:
 - **Contamination-caused degradation, predicted with calibrated sets.** Predicting a fine-tune's
   outcome before training is published (TuneAhead, ICML 2026 [C1]); our claim is limited to
   damage caused by contamination, with conformal sets, measured against ground truth.
-- **A live alarm with a stated false-alarm rate**, calibrated on 20 healthy runs (X3, pending).
+- **A live alarm with a stated false-alarm rate**, calibrated on 20 healthy runs. It met the
+  false-alarm bar (6%) and missed the early-alarm bar (44%), reported as a failed gate (X3).
 - **A pre-registered, reported-as-written record**, including negative results: GATE 3's failure
   and the X1 pilot's finding that origin cleaning is a strong baseline.
 
@@ -127,8 +133,8 @@ These are the cross-cutting limits. Each track section lists its own.
   *k* does too.
 - **The risk model is not yet sound.** Conformal coverage is 0.72 against 0.90, and it ties a
   single feature. We do not claim a calibrated guarantee for the dataset-level risk (Track A).
-- **Early warning:** GATE 3 failed on its pre-registered rule, the anisotropy finding runs
-  opposite to the registered direction and is exploratory, and the confirmatory run is pending.
+- **Early warning:** GATE 3 failed on its pre-registered rule and on the confirmatory run, and
+  the anisotropy finding runs opposite to the registered direction and is exploratory.
   Within a run the loss never rises, so "breach" means a gap from healthy runs and needs
   healthy reference runs.
 - **Repair:** harm-guided repair has not been shown to beat origin cleaning, and benchmark_near
