@@ -409,6 +409,96 @@
         "title": "BenchSample",
         "type": "object"
       },
+      "Canary": {
+        "description": "Gate X2 (``src.evaluation.canary``): Spearman rho of proxy vs target damage, with its CI.",
+        "properties": {
+          "ci": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Ci",
+            "type": "array"
+          },
+          "n_pairs": {
+            "title": "N Pairs",
+            "type": "integer"
+          },
+          "pairs": {
+            "items": {
+              "$ref": "#/components/schemas/CanaryPair"
+            },
+            "title": "Pairs",
+            "type": "array"
+          },
+          "rho": {
+            "title": "Rho",
+            "type": "number"
+          },
+          "rho_min": {
+            "title": "Rho Min",
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "rho",
+          "ci",
+          "rho_min",
+          "n_pairs",
+          "pairs"
+        ],
+        "title": "Canary",
+        "type": "object"
+      },
+      "CanaryPair": {
+        "description": "One matched cell: the proxy's and the target's damage (holdout ppl / the seed's ratio-0 ppl - 1).",
+        "properties": {
+          "proxy_damage": {
+            "title": "Proxy Damage",
+            "type": "number"
+          },
+          "ratio": {
+            "title": "Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "target_damage": {
+            "title": "Target Damage",
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "synthetic",
+              "recursive",
+              "paraphrased",
+              "benchmark_near",
+              "human_control"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "ratio",
+          "seed",
+          "proxy_damage",
+          "target_damage"
+        ],
+        "title": "CanaryPair",
+        "type": "object"
+      },
       "ConformalCoverage": {
         "properties": {
           "alpha": {
@@ -1537,7 +1627,7 @@
   "info": {
     "description": "Read-only access to ORIGIN-T's reports (HANDBOOK \u00a77.7). Errors are RFC 7807 problem+json. Responses carry a weak ETag; send it as If-None-Match for a 304.",
     "title": "ORIGIN-T API",
-    "version": "1.4.0"
+    "version": "1.5.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2430,6 +2520,50 @@
         "summary": "Trainlog",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/v1/x2/canary": {
+      "get": {
+        "description": "The Gate X2 verdict and its matched proxy/target cells; 404 until X2 has run.",
+        "operationId": "x2_canary_v1_x2_canary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Canary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not found, or not produced yet"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Invalid request parameters"
+          }
+        },
+        "summary": "X2 Canary",
+        "tags": [
+          "x2"
         ]
       }
     },

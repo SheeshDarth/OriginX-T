@@ -35,7 +35,9 @@ def verdict(proxy: dict, target: dict, rho_min=0.7, n_boot=10000, seed=0) -> dic
             boots.append(r)
     lo, hi = np.percentile(boots, [2.5, 97.5])
     ok = rho >= rho_min and lo > 0
-    return {"n_pairs": len(keys), "rho": rho, "ci": [float(lo), float(hi)], "rho_min": rho_min,
+    pairs = [{"type": k[0], "ratio": k[1], "seed": k[2], "proxy_damage": float(a), "target_damage": float(b)}
+             for k, a, b in zip(keys, x, y)]
+    return {"n_pairs": len(keys), "rho": rho, "pairs": pairs, "ci": [float(lo), float(hi)], "rho_min": rho_min,
             "status": "passed" if ok else "failed"}
 
 

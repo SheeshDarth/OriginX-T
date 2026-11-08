@@ -663,9 +663,10 @@ components and chart helpers (§8.6). Revanth reviews for consistency.
       trainlogs when no run is live. Done (#40): `/monitor` and `/monitor/$runId`; run list from
       `GET /v1/runs`, healthy bands from `GET /v1/x3/monitor` (404, and said so, until X3 is
       calibrated after CP0); Vitest with a fake EventSource, Playwright flow with axe.
-- [ ] `routes/canary/`: **Canary (X2).** Proxy-vs-target scatter with ρ and CI, and a
-      predict-for-this-dataset card.
-- [ ] Playwright e2e for both screens (one flow each), plus axe checks.
+- [x] `routes/Canary.tsx`: **Canary (X2).** Proxy-vs-target scatter with ρ and CI, from
+      `GET /v1/x2/canary` (API 1.5.0). Done (#41). The predict-for-this-dataset card is **not
+      built**: there is no calibrated predictor of target damage yet (§10.5, last item).
+- [x] Playwright e2e for both screens (one flow each), plus axe checks.
 
 ---
 

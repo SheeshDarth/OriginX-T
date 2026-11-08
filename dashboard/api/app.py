@@ -29,7 +29,7 @@ from src.ingestion.loaders import normalize_record
 from src.ingestion.schema import Sample
 
 REPO = Path(__file__).resolve().parents[2]
-API_VERSION = "1.4.0"  # 1.1: audits; 1.2: /runs/{id}/stream; 1.3: /risk/evaluation; 1.4: /runs, /x3/monitor
+API_VERSION = "1.5.0"  # 1.1: audits; 1.2: /runs/{id}/stream; 1.3: /risk/evaluation; 1.4: /runs, /x3/monitor; 1.5: /x2/canary
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
@@ -274,6 +274,27 @@ class AlarmMonitor(Model):
     threshold_infinite: bool
 
 
+class CanaryPair(Model):
+    """One matched cell: the proxy's and the target's damage (holdout ppl / the seed's ratio-0 ppl - 1)."""
+
+    type: ContaminationType
+    ratio: float
+    seed: int
+    proxy_damage: float
+    target_damage: float
+
+
+class Canary(Model):
+    """Gate X2 (``src.evaluation.canary``): Spearman rho of proxy vs target damage, with its CI."""
+
+    status: Literal["passed", "failed"]
+    rho: float
+    ci: list[float]        # 95% bootstrap [low, high]
+    rho_min: float         # the pre-registered bar
+    n_pairs: int
+    pairs: list[CanaryPair]
+
+
 class BenchSample(Model):
     sample_id: str
     prompt: str
@@ -441,7 +462,16 @@ def _gates(reports: Reports) -> list[Gate]:
                 "trajectories": ew["trajectories"], "never_collapse": ew["never_collapse"],
                 "signals": {k: {"auroc": v.get("auroc"), "permutation_p": v.get("permutation_p"),
                                 "warns": v.get("warns")} for k, v in ew["signals"].items()}}))
-    out += [gate(x, "pending") for x in ("x1", "x2", "x3")]
+    out.append(gate("x1", "pending"))
+    x2 = reports.json_or_none("reports/x2/gate_x2.json")
+    out.append(gate("x2", "pending") if x2 is None else gate(
+        "x2", x2["status"], source="reports/x2/gate_x2.json",
+        details={k: x2[k] for k in ("rho", "ci", "rho_min", "n_pairs")}))
+    x3 = reports.json_or_none("reports/x3/gate_x3.json")
+    out.append(gate("x3", "pending") if x3 is None else gate(
+        "x3", "passed" if x3["passed"] else "failed",
+        source="reports/x3/gate_x3.json",
+        details={k: x3[k] for k in ("early_alarm_rate", "observed_false_alarm_rate", "median_lead_steps")}))
     return out
 
 
@@ -629,6 +659,12 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
     def x3_monitor(request: Request, response: Response) -> Any:
         """The calibrated X3 monitor (healthy band + threshold); 404 until it is calibrated."""
         rel = "reports/x3/monitor.json"
+        return _cached(request, response, reports.etag(rel)) or reports.json(rel)
+
+    @app.get("/v1/x2/canary", response_model=Canary, tags=["x2"])
+    def x2_canary(request: Request, response: Response) -> Any:
+        """The Gate X2 verdict and its matched proxy/target cells; 404 until X2 has run."""
+        rel = "reports/x2/gate_x2.json"
         return _cached(request, response, reports.etag(rel)) or reports.json(rel)
 
     @app.get("/v1/runs/{run_id}/trainlog", response_model=list[TrainlogRow], tags=["runs"])

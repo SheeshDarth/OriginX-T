@@ -1,6 +1,176 @@
 {
  "n_pairs": 24,
  "rho": 0.7765217391304347,
+ "pairs": [
+  {
+   "type": "benchmark_near",
+   "ratio": 0.5,
+   "seed": 0,
+   "proxy_damage": 0.003771723804653071,
+   "target_damage": 0.018145988707262806
+  },
+  {
+   "type": "benchmark_near",
+   "ratio": 0.5,
+   "seed": 1,
+   "proxy_damage": 0.005608057223984719,
+   "target_damage": -0.08503646336865478
+  },
+  {
+   "type": "benchmark_near",
+   "ratio": 0.5,
+   "seed": 2,
+   "proxy_damage": 0.00945846343361767,
+   "target_damage": 0.0027893207222595695
+  },
+  {
+   "type": "benchmark_near",
+   "ratio": 1.0,
+   "seed": 0,
+   "proxy_damage": 0.025347341513491717,
+   "target_damage": -0.008228662481799098
+  },
+  {
+   "type": "benchmark_near",
+   "ratio": 1.0,
+   "seed": 1,
+   "proxy_damage": 0.020468761103342947,
+   "target_damage": -0.03987244229736797
+  },
+  {
+   "type": "benchmark_near",
+   "ratio": 1.0,
+   "seed": 2,
+   "proxy_damage": 0.02655149190663475,
+   "target_damage": 0.12041749512351219
+  },
+  {
+   "type": "paraphrased",
+   "ratio": 0.5,
+   "seed": 0,
+   "proxy_damage": 0.042685527884090746,
+   "target_damage": 0.11199945957260105
+  },
+  {
+   "type": "paraphrased",
+   "ratio": 0.5,
+   "seed": 1,
+   "proxy_damage": 0.0411393357502472,
+   "target_damage": -0.05734926491897896
+  },
+  {
+   "type": "paraphrased",
+   "ratio": 0.5,
+   "seed": 2,
+   "proxy_damage": 0.048136809617004506,
+   "target_damage": 0.056025287649393185
+  },
+  {
+   "type": "paraphrased",
+   "ratio": 1.0,
+   "seed": 0,
+   "proxy_damage": 0.15943867831004543,
+   "target_damage": 0.15250894053785014
+  },
+  {
+   "type": "paraphrased",
+   "ratio": 1.0,
+   "seed": 1,
+   "proxy_damage": 0.13536726067805738,
+   "target_damage": 0.009164437031088157
+  },
+  {
+   "type": "paraphrased",
+   "ratio": 1.0,
+   "seed": 2,
+   "proxy_damage": 0.17087942606554773,
+   "target_damage": 0.2526384636535133
+  },
+  {
+   "type": "recursive",
+   "ratio": 0.5,
+   "seed": 0,
+   "proxy_damage": 0.05451618640896627,
+   "target_damage": 0.09191277991628755
+  },
+  {
+   "type": "recursive",
+   "ratio": 0.5,
+   "seed": 1,
+   "proxy_damage": 0.05640845040626341,
+   "target_damage": 0.07877423716452925
+  },
+  {
+   "type": "recursive",
+   "ratio": 0.5,
+   "seed": 2,
+   "proxy_damage": 0.06600371762358836,
+   "target_damage": 0.10334511644900024
+  },
+  {
+   "type": "recursive",
+   "ratio": 1.0,
+   "seed": 0,
+   "proxy_damage": 0.2127880282423915,
+   "target_damage": 0.3698627783149271
+  },
+  {
+   "type": "recursive",
+   "ratio": 1.0,
+   "seed": 1,
+   "proxy_damage": 0.19444350476663486,
+   "target_damage": 0.19112608490674976
+  },
+  {
+   "type": "recursive",
+   "ratio": 1.0,
+   "seed": 2,
+   "proxy_damage": 0.219089062864245,
+   "target_damage": 0.3182073430256216
+  },
+  {
+   "type": "synthetic",
+   "ratio": 0.5,
+   "seed": 0,
+   "proxy_damage": 0.0510166949061126,
+   "target_damage": 0.17471004042009386
+  },
+  {
+   "type": "synthetic",
+   "ratio": 0.5,
+   "seed": 1,
+   "proxy_damage": 0.05012975260876029,
+   "target_damage": -0.018292664732201924
+  },
+  {
+   "type": "synthetic",
+   "ratio": 0.5,
+   "seed": 2,
+   "proxy_damage": 0.057668508046348155,
+   "target_damage": 0.1028500859469057
+  },
+  {
+   "type": "synthetic",
+   "ratio": 1.0,
+   "seed": 0,
+   "proxy_damage": 0.19289122508843604,
+   "target_damage": 0.21505816503941233
+  },
+  {
+   "type": "synthetic",
+   "ratio": 1.0,
+   "seed": 1,
+   "proxy_damage": 0.19100819606729003,
+   "target_damage": 0.06951487123477995
+  },
+  {
+   "type": "synthetic",
+   "ratio": 1.0,
+   "seed": 2,
+   "proxy_damage": 0.19826048207912006,
+   "target_damage": 0.20683138760914566
+  }
+ ],
  "ci": [
   0.5076724258513752,
   0.9066490532804933
