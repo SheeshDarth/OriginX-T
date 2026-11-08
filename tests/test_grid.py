@@ -1576,3 +1576,33 @@ def test_rerun_types_needs_at_least_one_type(tmp_path, monkeypatch):
         grid.main(["--config", str(config), "--rerun-types"])
     assert exc.value.code == 2
     assert (tmp_path / "out/results.jsonl").read_bytes() == original and _backups(tmp_path) == []
+
+
+def test_pools_from_trains_a_target_model_on_the_proxys_exact_data_and_never_generates(
+    tmp_path, monkeypatch
+):
+    proxy_config, proxy_cfg, spy = _setup(
+        tmp_path, monkeypatch, seeds=(0,), types=["synthetic"], ratios=[0.0, 1.0], base_model="proxy-m"
+    )
+    assert grid.main(["--config", str(proxy_config)]) == 0
+    proxy_texts = next(t for n, t, _ in spy.trained if n == "synthetic_r1_s0")
+    generated = len(spy.generators)
+    spy.trained.clear()
+
+    target = {**proxy_cfg, "base_model": "target-m", "pools_from": str(proxy_config),
+              "output_dir": str(tmp_path / "x2"), "models_dir": str(tmp_path / "x2m"),
+              "figure": str(tmp_path / "x2/curves.png")}
+    assert config_fingerprint(target) != config_fingerprint(proxy_cfg)  # its own results file
+    config = tmp_path / "x2.yaml"
+    config.write_text(yaml.safe_dump(target), encoding="utf-8")
+    assert grid.main(["--config", str(config)]) == 0
+
+    assert next(t for n, t, _ in spy.trained if n == "synthetic_r1_s0") == proxy_texts
+    assert len(spy.generators) == generated and spy.kwargs["synthetic_r1_s0"]["base_model"] == "target-m"
+
+    # a pool the proxy never made is an error, not a regenerated, different dataset
+    target["types"] = ["paraphrased"]
+    target["gate"] = {**target["gate"], "collapse_types": ["paraphrased"]}
+    config.write_text(yaml.safe_dump(target), encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match="pools_from"):
+        grid.main(["--config", str(config)])
