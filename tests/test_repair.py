@@ -9,7 +9,8 @@ from src.finetune.grid import Cell, draw_human, human_control_pool
 from src.ingestion.check_leakage import text_fingerprint
 from src.ingestion.schema import Sample
 from src.mitigation.repair import (
-    STRATEGIES, protect_rare, rank, recovery, repaired, replacements, run_repair, summarize,
+    STRATEGIES, benchmark_recovery, bootstrap_mean_ci, protect_rare, rank, recovery, repaired, replacements,
+    run_repair, summarize,
 )
 
 REPAIR_KEYS = {"schema", "dataset", "cell", "strategy", "k_replaced", "holdout_ppl", "benchmark_ppl",
@@ -188,6 +189,57 @@ def test_h5_reports_what_the_rare_rule_changed():
             {"cell": "d", "strategy": "random+rare", "recovery": None, "distinct_2": 0.6}]
     h5 = summarize(rows, collapse_types=["synthetic"], seeds=[0], pilot_cells=[])["h5"]
     assert h5 == {"random": {"c": {"recovery_change": -0.1, "distinct_2_change": 0.05}}}
+
+
+def test_benchmark_recovery_measures_the_memorisation_undone():
+    # memorisation lowers benchmark ppl: contaminated 59.8 < clean 61.2
+    assert benchmark_recovery(59.8, 61.2, 61.2) == 1.0
+    assert benchmark_recovery(59.8, 61.2, 59.8) == 0.0
+    assert benchmark_recovery(59.8, 61.2, 60.5) == 0.5
+    assert benchmark_recovery(61.5, 61.2, 61.0) is None, "nothing memorised, nothing to undo"
+
+
+def test_knn_guided_ranks_by_risk_knn():
+    samples = [_s(i) for i in range(4)]
+    scores = {"human-0": -0.9, "human-1": -0.1, "human-2": -0.5, "human-3": -0.3}
+    assert rank(samples, "knn_guided", scores, 0)[:2] == [1, 3]
+
+
+def _grid_rows():
+    return {
+        "benchmark_near_r0.5_s0": {"ratio": 0.5, "seed": 0, "holdout_ppl": 56.7, "benchmark_ppl": 59.8},
+        "synthetic_r0_s0": {"ratio": 0.0, "seed": 0, "holdout_ppl": 56.5, "benchmark_ppl": 61.2},
+    }
+
+
+def test_secondary_compares_harm_with_origin_cleaning_on_the_right_metric():
+    rows = []
+    for seed, (h, o) in enumerate([(0.9, 1.0), (0.8, 1.0), (0.95, 1.1)]):
+        rows += [_row(f"synthetic_r0.5_s{seed}", "harm_guided", h), _row(f"synthetic_r0.5_s{seed}", "risk_guided", o)]
+    # benchmark_near: holdout recovery says harm wins, benchmark recovery says origin does
+    rows += [{"cell": "benchmark_near_r0.5_s0", "strategy": s, "recovery": rec, "benchmark_ppl": b}
+             for s, rec, b in (("harm_guided", 3.0, 60.1), ("risk_guided", -0.4, 60.5))]
+    s = summarize(rows, collapse_types=["synthetic"], seeds=[0, 1, 2], pilot_cells=[], grid_rows=_grid_rows())
+    sec = s["secondary"]
+    assert sec["recovery"]["per_cell"] == {"synthetic_r0.5_s0": -0.1, "synthetic_r0.5_s1": -0.2,
+                                           "synthetic_r0.5_s2": -0.15}
+    assert sec["recovery"]["n"] == 3 and abs(sec["recovery"]["mean"] + 0.15) < 1e-9
+    lo, hi = sec["recovery"]["ci95"]
+    assert -0.2 <= lo <= hi <= -0.1 and sec["recovery"]["reading"] == "risk_guided better"
+    assert "benchmark_near_r0.5_s0" not in sec["recovery"]["per_cell"]
+    assert s["benchmark_recovery"]["benchmark_near_r0.5_s0"] == {"harm_guided": 0.214286, "risk_guided": 0.5}
+    assert sec["benchmark_recovery"]["per_cell"] == {"benchmark_near_r0.5_s0": -0.285714}
+    assert sec["benchmark_recovery"]["reading"] == "not evaluable", "one cell has no CI"
+
+
+def test_secondary_ci_is_seeded_and_brackets_a_tie():
+    assert bootstrap_mean_ci([0.1, -0.1, 0.05, -0.05]) == bootstrap_mean_ci([0.1, -0.1, 0.05, -0.05])
+    lo, hi = bootstrap_mean_ci([0.1, -0.1, 0.05, -0.05])
+    assert lo < 0 < hi
+    rows = [_row(f"synthetic_r0.5_s{i}", s, r) for i, d in enumerate([0.1, -0.1, 0.05, -0.05])
+            for s, r in (("harm_guided", 0.5 + d), ("risk_guided", 0.5))]
+    sec = summarize(rows, collapse_types=["synthetic"], seeds=[0], pilot_cells=[])["secondary"]
+    assert sec["recovery"]["reading"] == "no difference"
 
 
 def test_shipped_config_and_fixture_use_the_same_strategies():

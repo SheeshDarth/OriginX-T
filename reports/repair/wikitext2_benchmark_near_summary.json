@@ -27,5 +27,27 @@
     "status": "not evaluable",
     "rule": "harm_guided - random recovery >= 0.1 at ratio 0.5 on >= 2 of ['synthetic', 'recursive', 'paraphrased'], every seed"
   },
-  "h5": {}
+  "h5": {},
+  "benchmark_recovery": {
+    "benchmark_near_r0.5_s0": {
+      "harm_guided": 0.056342,
+      "repr_sim": 0.539543,
+      "risk_guided": 0.178686,
+      "random": 0.479724,
+      "perplexity_filter": 0.782496,
+      "oracle": 0.89797
+    }
+  },
+  "secondary": {
+    "comparison": "harm_guided - risk_guided",
+    "benchmark_recovery": {
+      "per_cell": {
+        "benchmark_near_r0.5_s0": -0.122344
+      },
+      "n": 1,
+      "mean": -0.122344,
+      "ci95": null,
+      "reading": "not evaluable"
+    }
+  }
 }

@@ -17,7 +17,7 @@ SCORE_KEYS = {"schema", "dataset", "cell", "sample_id", "method", "score", "high
 REPAIR_KEYS = {"schema", "dataset", "cell", "strategy", "k_replaced", "holdout_ppl", "benchmark_ppl",
                "distinct_2", "recovery", "seed"}
 # §9.3: the repair strategies X1 compares (risk_guided uses Track C's risk_* scores)
-STRATEGIES = {"harm_guided", "repr_sim", "risk_guided", "random", "perplexity_filter", "oracle"}
+STRATEGIES = {"harm_guided", "repr_sim", "risk_guided", "knn_guided", "random", "perplexity_filter", "oracle"}
 _CELL = re.compile(r"(?P<type>\w+?)_r(?P<ratio>[\d.]+)_s(?P<seed>\d+)")
 
 
