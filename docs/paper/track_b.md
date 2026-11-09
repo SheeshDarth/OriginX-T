@@ -1,7 +1,7 @@
 # Track B: contaminated data, the bench, and repair by harm (draft for T3, #23)
 
 *Siddharth. Every number cites the committed file or issue it comes from. Draft of
-2026-11-02, WikiText-2 only. The X1 results (§5) are placeholders until the pilot runs.*
+2026-11-08, WikiText-2 only. §5 has the X1 pilot (B8); the full grid (B9) is still to run.*
 
 ## 1. Contamination with ground truth
 A detector or cleaner can only be scored against a known answer, so every contaminated
@@ -80,6 +80,8 @@ with the grid's settings and seed. The strategies:
 - **harm_guided**: harm_lora_grad.
 - **repr_sim**: harm_repr_sim.
 - **risk_guided**: Track C's reference-model score, i.e. cleaning *by origin*.
+- **knn_guided**: Track C's nearest-neighbour redundancy score (`risk_knn`), added before
+  B9 (D10) because it is the score that finds benchmark_near copies.
 - **perplexity_filter**: the classic quality filter.
 - **random**: the floor.
 - **oracle**: the true labels, the upper bound.
@@ -99,16 +101,57 @@ at ratio 0.5 on ≥ 2 of the 3 collapse types, on every seed. The pilot (seed 0,
 and recursive at ratio 0.5) decides go/no-go at CP1. If harm cannot beat random by
 2026-12-15, it is reported as a negative result.
 
+**Secondary: harm vs origin** (pre-registered 2026-11-08, D10, before B9). The question X1
+was adopted for is whether harm beats *origin* cleaning, not random, so the full grid also
+reports harm_guided − risk_guided on every cell with a paired bootstrap 95% CI, whatever it
+shows. benchmark_near is scored by **benchmark recovery** instead, because its holdout damage
+is within noise (0.21 ppl): (bench_repaired − bench_contaminated) / (bench_clean −
+bench_contaminated), where 1 means the memorised items are as unfamiliar as before training.
+
 ## 5. Results
-*Pending the pilot (B8). Reference points from the grid, seed 0 (`reports/grid/results.jsonl`):
-hidden-holdout perplexity 56.52 clean, 59.41 for synthetic at ratio 0.5, and 59.60 for
-recursive at ratio 0.5. That leaves about 3 perplexity points to recover per pilot cell.*
-- [ ] Harm-score AUROC vs `true_source`, next to `risk_reflm` and `risk_knn`
-  (`reports/scores/wikitext2_harm_eval.json`).
-- [ ] Recovery and distinct-2 per strategy (`reports/repair/wikitext2.jsonl`), the pilot
-  go/no-go and Gate X1 (`reports/repair/wikitext2_summary.json`).
-- [ ] Rare-cluster preservation (H5, B10): the same repair with and without the rule never to
-  empty a semantic cluster that is rare in the human reference.
+**X1 pilot** (B8; seed 0, ratio 0.5, k = 500; PR #122, `reports/repair/wikitext2.jsonl`).
+Hidden-holdout perplexity is 56.52 clean, 59.41 for synthetic and 59.60 for recursive
+(`reports/grid/results.jsonl`), so about 3 points to recover per cell.
+
+| strategy | synthetic recovery | recursive recovery | distinct-2 (syn / rec) |
+|---|---|---|---|
+| oracle (true labels) | 1.12 | 1.11 | 0.662 / 0.662 |
+| risk_guided (origin) | **1.15** | 1.06 | 0.670 / 0.666 |
+| harm_guided | 1.02 | 0.97 | 0.643 / 0.622 |
+| repr_sim | 0.88 | **1.09** | 0.660 / 0.661 |
+| random | 0.66 | 0.58 | 0.618 / 0.563 |
+| perplexity_filter | −0.02 | −0.06 | 0.568 / 0.475 |
+
+- **Pilot: go.** harm − random = +0.36 (synthetic) and +0.39 (recursive), above the
+  pre-registered 0.10 (`reports/repair/wikitext2_summary.json`). Gate X1 itself needs all three
+  seeds and the paraphrased type (B9).
+- **Origin cleaning ties or beats harm.** harm − origin is −0.12 and −0.09 (D10 secondary,
+  2 cells, so its CI means little until B9). Both sit near the oracle; recovery above 1 means
+  the repaired set beat the clean baseline, since the replacements are fresh human text.
+- **The classic quality filter makes things worse.** perplexity_filter removes the *human*
+  samples a reference model finds hardest, keeps the fluent machine text, and loses diversity
+  (distinct-2 0.475 on recursive, against 0.662 for the oracle).
+- **Detection explains the ranking** (AUROC against `true_source`, the two pilot cells pooled,
+  recomputed from `reports/scores/`): risk_reflm 0.930, harm_repr_sim 0.904, harm_lora_grad
+  0.902, risk_knn 0.410. The harm scores find generated text almost as well as the origin
+  score, so they clean about as well. The pilot shows no sign yet that harm picks out *which*
+  generated samples hurt most; B9's twelve cells per comparison can test that.
+
+**benchmark_near pilot** (extra, not part of Gate X1; `reports/repair/wikitext2_benchmark_near_summary.json`).
+Benchmark-item perplexity is 61.24 clean and 59.80 contaminated (memorisation lowers it).
+Benchmark recovery: oracle 0.90, perplexity_filter 0.78, repr_sim 0.54, random 0.48,
+risk_guided 0.18, harm_guided 0.06. **Harm-guided repair is worst here**, close to doing
+nothing. Its AUROC for the near-copies is 0.59 (risk_reflm 0.37), while risk_knn reaches
+0.96 (`reports/scores/wikitext2_harm_eval.json`), which is why knn_guided joins B9 (D10). A
+near-copy of a benchmark item looks like ordinary human text to the model, so neither its
+gradient nor its representation points away from the held-out target.
+
+**Still to run:**
+- [ ] B9: 24 cells × 7 strategies, Gate X1 and the D10 secondary (`configs/repair.yaml`).
+- [ ] H5 (B10): rare-cluster preservation. As specified ("never empty a rare cluster"), the rule
+  changed **no** picks in a ratio-0.5 rehearsal: each rare cluster has about 27 rows, so a
+  500-sample replacement never empties one (#65). A rule that binds is needed before H5 is
+  testable.
 
 ## 6. Limitations
 - **Scale.** DistilGPT-2 (82M) with LoRA on 1,000-sample sets. The bench makes no claim about
@@ -117,5 +160,8 @@ recursive at ratio 0.5. That leaves about 3 perplexity points to recover per pil
   end of a one-epoch fine-tune, and influence is known to change during training.
 - **The budget k uses the true contamination count.** Every strategy gets the same k, so the
   comparison is fair, but a deployed cleaner would have to estimate it.
+- **One seed so far.** The pilot is seed 0 on two cells. The ordering of the strong strategies
+  (oracle, risk_guided, harm_guided, repr_sim) changes between the two cells, so only the
+  large gaps (all four vs random, random vs perplexity_filter) are worth reading before B9.
 - **Paraphrase is weak.** The base model rarely preserves meaning, so "paraphrased" results
   say little about real paraphrase contamination.
