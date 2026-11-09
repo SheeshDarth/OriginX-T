@@ -41,11 +41,13 @@ the holdout and never repeats a text it already holds.
 
 **Rare-cluster preservation** (§9.4, the core mitigation, PRD H5; B10). For the strategies
 listed in ``preserve_rare_clusters``, each is also run as ``<strategy>+rare``: the same
-ranking, except that a sample is never replaced while it is the last one left in the set
-from a cluster that is rare in the seed's clean human draw (Track C's
-``semantic.cluster_assignments``: the reference's k-means tail). Such samples move to the
-end of the ranking, so they are replaced only if the budget cannot be met otherwise. The
-summary's ``h5`` compares recovery and distinct-2 with and without the rule.
+ranking, except that a cluster that is rare in the seed's clean human draw (Track C's
+``semantic.cluster_assignments``: the reference's k-means tail) loses no larger share of its
+rows than the set does: at most ``floor(n_c * k / N)`` of its ``n_c`` rows, and never its last.
+Samples past their cluster's cap move to the end of the ranking, so they are replaced only if
+the budget cannot be met otherwise. (The first rule, "never take a rare cluster's last
+sample", changed no pick at ratio 0.5: rare clusters hold ~27 rows each, #65.) The summary's
+``h5`` compares recovery and distinct-2 with and without the rule.
 
 Rows are appended to ``output`` after every retrain, so a run cut short resumes. Repaired
 checkpoints are deleted after scoring unless ``keep_models`` is set. The summary
@@ -138,23 +140,26 @@ def rank(samples: Sequence[Any], strategy: str, scores: Optional[Mapping[str, Op
     return sorted(order, key=lambda i: (signed[i] is None, -(signed[i] or 0.0)))
 
 
-def protect_rare(worst: Sequence[int], labels: Sequence[int], tail: set[int]) -> list[int]:
-    """``worst`` with every sample that would be the last of its tail cluster moved to the end.
+def protect_rare(worst: Sequence[int], labels: Sequence[int], tail: set[int], k: int) -> list[int]:
+    """``worst`` with the samples past their tail cluster's cap moved to the end (B10).
 
-    Walking the ranking, a sample from a tail cluster is deferred when it is the only one of
-    its cluster still in the set; otherwise it is taken and its cluster's count drops. So any
-    top-k of the result keeps every tail cluster non-empty, unless k exceeds the samples taken.
+    A tail cluster of ``n_c`` rows may lose ``min(floor(n_c * k / N), n_c - 1)`` of them: no
+    larger share than the whole set loses to a budget of ``k``, and never its last row.
+    Walking the ranking, a tail sample is taken while its cluster is under the cap and
+    deferred after. So any top-k of the result (k within the samples taken) respects every cap.
     """
-    left = {c: sum(1 for x in labels if x == c) for c in tail}
+    n = {c: sum(1 for x in labels if x == c) for c in tail}
+    cap = {c: min(n[c] * k // len(labels), n[c] - 1) for c in tail}
+    gone = dict.fromkeys(tail, 0)
     taken, deferred = [], []
     for i in worst:
         c = labels[i]
-        if c in tail and left[c] == 1:
+        if c in tail and gone[c] >= cap[c]:
             deferred.append(i)
             continue
         taken.append(i)
         if c in tail:
-            left[c] -= 1
+            gone[c] += 1
     return taken + deferred
 
 
@@ -249,7 +254,7 @@ def run_repair(
             worst = rank(samples, strategy, scores, cell.seed)
             if rare:
                 clusters = clusters if clusters is not None else clusters_for(cell, samples)
-                worst = protect_rare(worst, clusters[0], clusters[1])
+                worst = protect_rare(worst, clusters[0], clusters[1], budget)
             data = repaired(samples, worst, fresh, budget)
             model = train(data, cell, name)
             try:

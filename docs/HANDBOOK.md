@@ -550,8 +550,10 @@ Research and gate: §11 X1 and `docs/STRETCH_GOALS.md`.
 
 ### 9.4 Mitigation (core, PRD Must #5 / H5), by CP2
 The core mitigation *is* the repair pipeline above plus **rare-cluster preservation**: when
-replacing, never empty a semantic cluster that's rare in the human reference (use the cluster assignments
-from `src/features/semantic.py`, Track C, §10.7). Compare with and without. That's H5.
+replacing, a semantic cluster that's rare in the human reference loses no larger share of its rows
+than the set does (at most floor(n_c·k/N), never its last; use the cluster assignments from
+`src/features/semantic.py`, Track C, §10.7). Compare with and without. That's H5. (Fixed 2026-11-09,
+before B9: the first wording, "never empty a rare cluster", changed no pick at ratio 0.5, #65.)
 
 ### 9.5 Bench release, by CP3
 Public HF dataset + GitHub release, versioned, with manifest hashes; license check.
