@@ -1,21 +1,38 @@
 # Shared sections: introduction, related work, limitations (draft for T3, #23)
 
-*Vishnu. Draft of 2026-11-08. Citations are by survey number (`docs/LITERATURE_SURVEY.md`, "#n")
-or stretch-goal key (`docs/STRETCH_GOALS.md`, "[A6]"); they become a bibliography at merge.
+*Vishnu. Draft of 2026-11-08. Citations are keys into `docs/paper/bibliography.md` ("[shumailov24]"),
+which records each entry's verification status.
 Every result cites the track section it comes from (`track_a.md`, `track_b.md`, `track_c.md`).
 Claims follow the *revised* novelty wording of #112, not the first survey's. Entries marked
 TODO wait on results that do not exist yet; nothing here is a placeholder number.*
+
+## Abstract
+Teams learn whether a dataset will degrade their model only by fine-tuning on it. We build ORIGIN-T,
+a testbed with ground truth for this question: contaminated datasets (synthetic, recursive,
+paraphrased, benchmark-near and duplicate text mixed into human text at known ratios), fine-tuning
+runs over a ratio grid on two datasets (WikiText-2, TinyStories; DistilGPT-2 with LoRA), and
+pre-registered go/no-go gates fixed before their results existed. Damage is real and dose-dependent
+on both datasets, and caused by the contamination: on WikiText-2, hidden-holdout perplexity rises
+from 56.6 to 67.6 (synthetic) and 68.4 (recursive) at full contamination while a human-text control
+stays flat. A dataset-level risk model reaches a leave-one-type-out AUROC of 0.84, but its conformal
+sets under-cover (0.72 against 0.90) and it only ties a single reference-LM loss feature, so we do
+not claim that a multi-feature model beats a simple detector. White-box training signals separate
+contaminated from clean runs, yet the early-warning gate failed on both datasets, and a live,
+conformally calibrated alarm met its false-alarm bar (6%) but missed its early-alarm bar (44%
+against 50%). A small model's damage does predict a larger model's: Spearman rho 0.78, 95% CI
+[0.51, 0.91], against Pythia-410M. In a repair pilot, cleaning by origin matches harm-guided repair.
+We report the failed gates as written.
 
 ## 1. Introduction
 Fine-tuning a language model on a dataset is cheap to start and expensive to undo. Today a team
 learns whether a candidate dataset will degrade its model only by training on it, and a large
 body of work shows the damage can be silent: recursive training on model output makes the tails
-of the distribution disappear first (#1), and small amounts of synthetic data can already do
-lasting harm (#4). Measuring it by brute force costs more than most teams can spend: the clearest
-mixture study needed more than 1,000 models and 100k GPU-hours (#12).
+of the distribution disappear first [shumailov24], and small amounts of synthetic data can already do
+lasting harm [dohmatob24strong]. Measuring it by brute force costs more than most teams can spend: the clearest
+mixture study needed more than 1,000 models and 100k GPU-hours [kang25].
 
 Existing tools answer neighbouring questions. Detectors ask whether *a text* is machine-written
-(#25-28) and benchmark-contamination methods ask whether *a benchmark* has leaked (#20, #23, #24).
+[drayson25; dugan24; zhou25mgt; shen26] and benchmark-contamination methods ask whether *a benchmark* has leaked [dekoninck24; yang23; oren23].
 Neither is calibrated against the thing a practitioner cares about: how much *this dataset* will
 degrade *this model*.
 
@@ -57,7 +74,7 @@ could not find elsewhere:
 - **A ground-truth testbed and benchmark (ORIGIN-T-Bench)** with a contamination gradient,
   hidden-holdout safeguards and released data (Track B §1-3).
 - **Contamination-caused degradation, predicted with calibrated sets.** Predicting a fine-tune's
-  outcome before training is published (TuneAhead, ICML 2026 [C1]); our claim is limited to
+  outcome before training is published (TuneAhead [luo26tuneahead]); our claim is limited to
   damage caused by contamination, with conformal sets, measured against ground truth.
 - **A live alarm with a stated false-alarm rate**, calibrated on 20 healthy runs. It met the
   false-alarm bar (6%) and missed the early-alarm bar (44%), reported as a failed gate (X3).
@@ -66,54 +83,60 @@ could not find elsewhere:
 
 ## 2. Related work
 **Model collapse.** Recursive training on generated text degrades models and loses distribution
-tails first (#1, #2); the damage grows with the synthetic fraction and the generation depth
-(#4, #6), and mixing in real data can bound it (#5, #16). Shi et al. recast collapse as a drift
-from generalising to memorising the parent model (#7). Not all iteration collapses: under stated
-conditions it stays consistent (#9). This work describes collapse; it does not predict it for a
+tails first [shumailov24; alemohammad23]; the damage grows with the synthetic fraction and the generation depth
+[dohmatob24strong; seddik24], and mixing in real data can bound it [gerstgrasser24; kazdan24]. Shi et al. recast collapse as a drift
+from generalising to memorising the parent model [shi25]. Not all iteration collapses: under stated
+conditions it stays consistent [barzilai25]. This work describes collapse; it does not predict it for a
 given dataset. We reproduce it (GATE 0) and measure its dose-response.
 
 **Synthetic-data mixing and mitigation.** Kang et al. map natural, rephrased and generated
-mixtures at scale (#12); verification can rescue scaling (#14, #15). Du et al. find calibration
-error rises before accuracy falls (#13), the closest prior work to our early-warning question,
+mixtures at scale [kang25]; verification can rescue scaling [feng24; yi25]. Du et al. find calibration
+error rises before accuracy falls [du25], the closest prior work to our early-warning question,
 but with one hand-picked metric and no guarantee. Cleaning by origin already works: a
 machine-generated-text detector with importance resampling prevents collapse on GPT-2 and
-SmolLM2 and can beat purely human data (#25, [A6]). This is why origin cleaning is a required
-baseline for our harm-based repair, and in our pilot it is hard to beat.
+SmolLM2 and can beat purely human data [drayson25]. This is why origin cleaning is a required
+baseline for our harm-based repair, and in our pilot it is hard to beat. An epidemiological model of contamination likewise finds detection-based
+filtering among the most effective interventions [wang26sir].
 
 **Benchmark contamination.** Surveys find no detector reliable across contamination tiers
-(#18, #19, #21). Rephrased copies evade n-gram decontamination (#23), black-box tests exist for
-verbatim leakage (#24), and behavioural detection compares scores with a reference benchmark
-(#20). We reproduce the rephrasing failure with `benchmark_near`, and find that its harm shows
+[nourbakhsh26; xu24bdc; fu25]. Rephrased copies evade n-gram decontamination [yang23], black-box tests exist for
+verbatim leakage [oren23], and behavioural detection compares scores with a reference benchmark
+[dekoninck24]. We reproduce the rephrasing failure with `benchmark_near`, and find that its harm shows
 up in perplexity on the leaked items rather than in the holdout.
 
-**Provenance detection.** Detectors are brittle under decoding changes and attacks (#26) and a
-simple fine-tuned baseline is competitive while distribution shift stays unsolved (#28).
+**Provenance detection.** Detectors are brittle under decoding changes and attacks [dugan24] and a
+simple fine-tuned baseline is competitive while distribution shift stays unsolved [shen26].
+SynthSentry scores an unlabeled corpus for synthetic contamination before training from
+diversity and perplexity-spread measures, but does not tie the score to damage [myakala26].
 Our feature suite does not try to out-detect them. It asks whether dataset-level signals
 predict *damage*, and finds that a single reference-LM loss feature carries most of the signal.
 
 **Data attribution and repair.** Influence functions are fragile for LLMs and a representation
-baseline can beat them ([A1], [A2]); LoRA-gradient selection is cheap (LESS), and attribution-guided
-removal followed by retraining exists for *safety* degradation ([A7], [A8], [A9]). Our X1
+baseline can beat them ([li24influence; luo26reweight]); LoRA-gradient selection is cheap [xia24less], and attribution-guided
+removal followed by retraining exists for *safety* degradation [reddy26; li25rept; unverified-A9]; attribution also removes the effect only unreliably in a subliminal-learning
+test [weckbecker26]. Our X1
 applies the recipe to collapse and contamination damage with ground-truth labels and compares it
 head to head with origin cleaning.
 
 **Predicting fine-tuning outcomes and scale transfer.** TuneAhead forecasts a fine-tune's score
-from dataset descriptors and a short probe run, but not harm, and without calibration [C1].
-Forgetting during fine-tuning extrapolates across scale to within 1-2% [P5]; proxy models can
-rank datasets differently from their target unless the learning rate is reduced (ICLR 2026,
-[P1]). X2 asks the contamination version of this question, with an interval.
+from dataset descriptors and a short probe run, but not harm, and without calibration [luo26tuneahead].
+Forgetting during fine-tuning extrapolates across scale to within 1-2% [bethune25]; proxy models can
+rank datasets differently from their target unless the learning rate is reduced (ICLR 2026) [wang26proxy]. X2 asks the contamination version of this question, with an interval.
 
 **Calibration and early warning.** Split conformal prediction gives distribution-free coverage
-(Angelopoulos and Bates, 2021) and trajectory-level guarantees exist (arXiv 2610.34617, for
-diffusion models), so ours is an application, not a novelty claim. Discrete-time survival models
-(#29) and time-aware state-space models (#30) are the planned extensions and are gated on the
+[angelopoulos21] and trajectory-level guarantees exist [jing26] (for
+diffusion models), so ours is an application, not a novelty claim. Sequential conformal change detectors with
+optimal delay [bhattacharyya26] are the stronger baseline for the alarm and a natural extension. Discrete-time survival models
+[wiegrebe24] and time-aware state-space models [zhou26mamba] are the planned extensions and are gated on the
 risk model being sound (README feature 6).
 
 **Gap.** No system we found takes a dataset as input and returns a calibrated, contamination-
 specific degradation risk, nor a live alarm with a stated false-alarm rate for recursive
 collapse (`docs/LITERATURE_SURVEY.md` §5; `STRETCH_GOALS.md`). We re-ran the search on
-2026-11-02 and narrowed the claims accordingly; it is not a systematic review, and it should
-be repeated on Semantic Scholar for anything dated after that day before submission. **TODO.**
+2026-11-02 and again on 2026-11-09 (`docs/LITERATURE_REFRESH.md`): nothing dated after the first
+search was found and the claims stand, though a pre-training contamination score exists
+(SynthSentry) and our claim is the calibrated *damage* prediction. It is not a systematic review;
+repeat it on Semantic Scholar shortly before submission.
 
 ## 3. Limitations (shared)
 These are the cross-cutting limits. Each track section lists its own.
@@ -142,10 +165,24 @@ These are the cross-cutting limits. Each track section lists its own.
 - **Environment:** pools are not reproducible across GPUs (sampling), so the bench ships the
   data the grid trained on rather than a regeneration recipe.
 
-## 4. Open items for the merged draft
-- [ ] Abstract and conclusion (after CP0 verdicts, X3 and the TinyStories grid).
+## 4. Conclusion
+ORIGIN-T shows, on a testbed where the answer is known, that contamination causes dose-dependent
+damage that a small proxy model ranks well (X2 passed) and that a reference language model detects
+per sample. It also shows what does not yet work: the dataset-level risk model is not calibrated
+(0.72 coverage against 0.90) and does not beat its best single feature, white-box signals give no
+early warning on the contamination-ratio axis (GATE 3 failed twice), and the live alarm misses
+too many collapsing runs at the 10-step logging resolution (X3 failed), although its false-alarm
+rate held. In the repair pilot, origin cleaning is a strong baseline that harm-guided repair does
+not beat. We kept the rules fixed before the results and report the failures with the successes;
+that record, and the released data and code, are the contribution. The limits are scale (one
+82M model, one 410M target), one training recipe and weak synthetic generators. Next: the full
+repair grid with the harm-vs-origin comparison, more calibration data for the risk model, and a
+finer-grained alarm registered as a new experiment.
+
+## 5. Open items for the merged draft
+- [x] Abstract and conclusion (2026-11-09, from the CP0 verdicts; revisit after X1's full grid).
 - [ ] Convert survey numbers and stretch-goal keys to one bibliography; verify every entry
   marked preprint (the survey's own honesty note).
-- [ ] Repeat the literature search for work after 2026-11-02.
+- [x] Repeat the literature search for work after 2026-11-02 (2026-11-09, `docs/LITERATURE_REFRESH.md`; repeat once more before submission).
 - [ ] Update §1 "what we found" after each pending gate; every number must trace to a committed
   `reports/` file.
