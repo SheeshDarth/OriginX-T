@@ -20,7 +20,9 @@ not claim that a multi-feature model beats a simple detector. White-box training
 contaminated from clean runs, yet the early-warning gate failed on both datasets, and a live,
 conformally calibrated alarm met its false-alarm bar (6%) but missed its early-alarm bar (44%
 against 50%). A small model's damage does predict a larger model's: Spearman rho 0.78, 95% CI
-[0.51, 0.91], against Pythia-410M. In a repair pilot, cleaning by origin matches harm-guided repair.
+[0.51, 0.91], against Pythia-410M. In a full repair grid replicated on independent pools, harm-guided
+repair beats random (Gate X1) but does not beat cleaning by origin, and on leaked benchmark items it
+is the worst strategy.
 We report the failed gates as written.
 
 ## 1. Introduction
@@ -67,7 +69,10 @@ is provisional until the TinyStories grid):
 - A small-model canary predicts a larger one's damage: Pythia-410M against the DistilGPT-2
   proxy, Spearman ρ 0.78, CI [0.51, 0.91] (Track C §6; X2 passed).
 - In the repair pilot, harm-guided replacement beats random by 36-39 points, but **cleaning by
-  origin ties or beats it** (Track B §5; #122).
+  origin ties or beats it** (Track B §5; #122). The full grid, replicated on independent pools,
+  agrees: Gate X1 passes (harm − random 0.25-0.55 on all 9 ratio-0.5 cells), harm − origin is
+  −0.03, CI [−0.07, +0.01], and on benchmark near-copies harm-guided repair recovers nothing
+  (−0.02) while the near-duplicate score matches the oracle (Track B §5; #136).
 
 **Contributions.** We make these claims, narrowed by a second literature search to what we
 could not find elsewhere:
@@ -160,8 +165,10 @@ These are the cross-cutting limits. Each track section lists its own.
   the anisotropy finding runs opposite to the registered direction and is exploratory.
   Within a run the loss never rises, so "breach" means a gap from healthy runs and needs
   healthy reference runs.
-- **Repair:** harm-guided repair has not been shown to beat origin cleaning, and benchmark_near
-  needs a metric on leaked items. Gate X1 is not evaluable until the full grid (B9).
+- **Repair:** harm-guided repair does not beat origin cleaning, and each score cleans only the
+  contamination it detects. The full-grid result is a replicate on regenerated pools; the run on
+  the grid's own training sets would confirm it (#64). At ratio 1 every strategy replaces the
+  whole set, so only ratio 0.5 compares strategies.
 - **Environment:** pools are not reproducible across GPUs (sampling), so the bench ships the
   data the grid trained on rather than a regeneration recipe.
 
@@ -172,15 +179,17 @@ per sample. It also shows what does not yet work: the dataset-level risk model i
 (0.72 coverage against 0.90) and does not beat its best single feature, white-box signals give no
 early warning on the contamination-ratio axis (GATE 3 failed twice), and the live alarm misses
 too many collapsing runs at the 10-step logging resolution (X3 failed), although its false-alarm
-rate held. In the repair pilot, origin cleaning is a strong baseline that harm-guided repair does
-not beat. We kept the rules fixed before the results and report the failures with the successes;
+rate held. In the full repair grid, harm-guided repair beats random but not cleaning by origin, and
+protecting rare clusters changes nothing measurable. We kept the rules fixed before the results and report the failures with the successes;
 that record, and the released data and code, are the contribution. The limits are scale (one
-82M model, one 410M target), one training recipe and weak synthetic generators. Next: the full
-repair grid with the harm-vs-origin comparison, more calibration data for the risk model, and a
+82M model, one 410M target), one training recipe and weak synthetic generators. Next: the repair
+grid on the grid's own training sets, more calibration data for the risk model, and a
 finer-grained alarm registered as a new experiment.
 
 ## 5. Open items for the merged draft
-- [x] Abstract and conclusion (2026-11-09, from the CP0 verdicts; revisit after X1's full grid).
+- [x] Abstract and conclusion (2026-11-09, from the CP0 verdicts; X1 full grid added 2026-11-10).
+- [x] One merged draft: `python docs/paper/build.py` writes `docs/paper/draft.md` from the
+  section files (2026-11-10).
 - [ ] Convert survey numbers and stretch-goal keys to one bibliography; verify every entry
   marked preprint (the survey's own honesty note).
 - [x] Repeat the literature search for work after 2026-11-02 (2026-11-09, `docs/LITERATURE_REFRESH.md`; repeat once more before submission).

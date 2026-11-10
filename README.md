@@ -41,7 +41,7 @@ fully visible. It blends three ideas into one coherent system: **ORIGIN**
 | 6 | Discrete-time survival early-warning model | Gated | Not started (only if CP2 is green) |
 | 7 | White-box representational-collapse signals (effective rank, anisotropy) | Gated | Done on 66 checkpoints, and live during training (X3) |
 | 8 | Causal attribution (Shapley) + collapse scaling law | Gated | Not started |
-| 9 | Mitigation: harm-based repair (X1) and rare-cluster preservation | Gated | Fixtures done; pilot not started |
+| 9 | Mitigation: harm-based repair (X1) and rare-cluster preservation | Gated | Pilot go; full grid replicated on independent pools (#136): X1 passes, harm ties origin cleaning, rare-cluster preservation has no measurable effect |
 | 10 | **ORIGIN-T-Bench** — released benchmark + leaderboard | Committed (M8) | Not started |
 | 11 | **ORIGIN-T Console**: web UI over a FastAPI backend | Could | Overview, curves, cell detail, audit, repair, live monitor |
 
@@ -182,7 +182,7 @@ fixed before its results existed ([TRD §11](docs/TRD.md#11-gono-go-gates), HAND
 | GATE 1 | Feature suite + static baseline run cleanly on ≥ 2 datasets | **Not evaluable** | WikiText evaluated; the TinyStories grid, features and scores now exist (#126), the risk evaluation on both datasets is pending (Track A) ([#94](https://github.com/SheeshDarth/OriginX-T/pull/94), [#105](https://github.com/SheeshDarth/OriginX-T/pull/105)) |
 | GATE 2 | Dose-response, above seed noise at ratio 0.25 | **Passed** on WikiText and TinyStories | 75-cell WikiText grid and 105-cell TinyStories grid (#126; [#11](https://github.com/SheeshDarth/OriginX-T/pull/11), [#12](https://github.com/SheeshDarth/OriginX-T/pull/12), [#73](https://github.com/SheeshDarth/OriginX-T/pull/73)) |
 | GATE 3 | A white-box signal warns before collapse | **Failed** (WikiText, then the confirmatory run on TinyStories 2026-11-08) | No signal beats the permutation bar (AUROC 0.08-0.56); `reports/grid_tinystories/earlywarning.json` |
-| X1 | Harm-guided repair beats random by ≥ 10 pts | Pilot **go**; gate not evaluable | Harm beats random by +36/+39 pts (1 seed), but cleaning by origin ties or beats it; full grid pending (B9). [#122](https://github.com/SheeshDarth/OriginX-T/pull/122) |
+| X1 | Harm-guided repair beats random by ≥ 10 pts | **Passed** on the independent-pool replicate | Full grid (240 retrains, #136): harm − random 0.25-0.55 on all 9 ratio-0.5 cells; harm − origin −0.03 [−0.07, +0.01], no difference; on benchmark near-copies harm recovers nothing. Pilot on the grid's pools: [#122](https://github.com/SheeshDarth/OriginX-T/pull/122) |
 | X2 | Small-model canary predicts a bigger model's damage (ρ ≥ 0.7) | **Passed 2026-11-08** | Spearman ρ 0.78, CI [0.51, 0.91], 24 pairs, Pythia-410M target; `reports/x2/gate_x2.json` |
 | X3 | Live alarm before the breach at a calibrated 5% FA | **Failed 2026-11-08** | Early alarm 44% (bar 50%), false alarms 6% (bar 10%); `reports/x3/gate_x3.json`;  Monitor, data, pre-registered plan ([#98](https://github.com/SheeshDarth/OriginX-T/pull/98), [#110](https://github.com/SheeshDarth/OriginX-T/pull/110)) |
 
@@ -210,8 +210,8 @@ healthy ones, so damage is a gap, not a turn. Anisotropy separates by step 20 of
 Gate X3 rule is confirmed in `configs/x3.yaml` (2026-11-08); the verdict (2026-11-08) is a fail: the alarm fired early on 8 of 18 collapsing runs (bar 50%), with 1 of 16 false alarms. Every miss is a ratio-1 run whose breach is at the first logged step, so no lead was possible at a 10-step log interval.
 
 **Next: CP1 (Fri 2026-11-20).** GATE 1 needs the risk model evaluated on both datasets (Track A);
-X1's full repair grid (B9, with the harm-vs-origin secondary of HANDBOOK D10) is Track B; the
-rare-cluster preservation work (B10) and the bench release (B12) follow. The three Track C
+X1's full repair grid ran as an independent-pool replicate (#136, Gate X1 passed, harm ties
+origin cleaning) with the B10 rare-cluster rule (#135); the bench release (B12) follows. The three Track C
 verdicts are in: GATE 3 failed, X3 failed, X2 passed. What remains for Track C is the paper (#23).
 
 <details><summary>Earlier results (GATE 0, GATE 2, benchmark_near, GATE 3 in detail)</summary>
