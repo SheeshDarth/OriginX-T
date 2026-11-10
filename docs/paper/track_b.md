@@ -1,7 +1,8 @@
 # Track B: contaminated data, the bench, and repair by harm (draft for T3, #23)
 
 *Siddharth. Every number cites the committed file or issue it comes from. Draft of
-2026-11-08, WikiText-2 only. §5 has the X1 pilot (B8); the full grid (B9) is still to run.*
+2026-11-10, WikiText-2 only. §5 has the X1 pilot (B8) and a full-grid replicate on independent
+pools; the official B9 is still to run.*
 
 ## 1. Contamination with ground truth
 A detector or cleaner can only be scored against a known answer, so every contaminated
@@ -146,12 +147,48 @@ nothing. Its AUROC for the near-copies is 0.59 (risk_reflm 0.37), while risk_knn
 near-copy of a benchmark item looks like ordinary human text to the model, so neither its
 gradient nor its representation points away from the held-out target.
 
+**B9 independent-pool replicate** (2026-11-10; `reports/repair_replicate/`). The full grid,
+24 cells × 7 strategies plus 3 `+rare` arms (240 retrains), on pools *regenerated* on
+Siddharth's RTX 4050 with the same config fingerprint and rules. These are not the grid's
+training sets, so this is a replicate on independent data, not the official B9 (#64). At ratio 1
+every row is contaminated, so k = N and every strategy replaces the whole set: all ratio-1
+recoveries are ≈ 1 by construction. **Only ratio 0.5 separates the strategies.**
+
+Mean recovery at ratio 0.5 (3 seeds each):
+
+| strategy | synthetic | recursive | paraphrased |
+|---|---|---|---|
+| oracle | 1.05 | 1.04 | 1.06 |
+| risk_guided (origin) | 1.01 | 1.04 | 1.07 |
+| harm_guided | 1.02 | 0.93 | 1.08 |
+| repr_sim | 0.89 | 0.99 | 1.03 |
+| random | 0.60 | 0.61 | 0.58 |
+| knn_guided | 0.45 | 0.43 | 0.52 |
+| perplexity_filter | 0.07 | 0.11 | −0.08 |
+
+- **Gate X1 passes on the replicate:** harm − random is 0.25–0.55 on every type and seed, above
+  0.10 on all 9 cells, 3 of 3 types. (The official verdict is the grid machine's run.)
+- **D10 secondary: harm does not beat origin cleaning.** At ratio 0.5, harm − risk_guided =
+  −0.031, 95% CI [−0.073, +0.007] over 9 cells: no difference. Harm vs repr_sim: +0.039
+  [−0.023, +0.103], also no difference. The summary's pooled number (−0.015, 18 cells) is diluted
+  by the ratio-1 ties.
+- **On benchmark_near, harm-guided repair is the worst strategy.** Benchmark recovery at ratio 0.5:
+  oracle 0.94, knn_guided 0.93, perplexity_filter 0.88, repr_sim 0.70, random 0.39,
+  risk_guided 0.19, harm_guided **−0.02**. The D10 secondary on benchmark recovery reads
+  "origin better" (−0.11, CI [−0.23, −0.01], 6 cells). knn_guided, the near-duplicate score, is
+  as good as the oracle here and the worst learned strategy on the collapse types (0.43–0.52):
+  each score cleans the contamination it detects.
+- **H5: rare-cluster preservation changes nothing measurable.** With the binding rule (#135),
+  `+rare` minus plain at ratio 0.5 is +0.004 [−0.021, +0.028] for harm_guided, +0.010
+  [−0.014, +0.033] for risk_guided and +0.014 [−0.010, +0.036] for random, with distinct-2 moving
+  by under 0.001. Protecting rare clusters costs no recovery and buys no measurable diversity at
+  this scale.
+- **The perplexity filter is harmful again**, as in the pilot, and costs the most diversity
+  (distinct-2 0.596 against 0.661 for the oracle, collapse types pooled).
+
 **Still to run:**
-- [ ] B9: 24 cells × 7 strategies, Gate X1 and the D10 secondary (`configs/repair.yaml`).
-- [ ] H5 (B10): rare-cluster preservation. As specified ("never empty a rare cluster"), the rule
-  changed **no** picks in a ratio-0.5 rehearsal: each rare cluster has about 27 rows, so a
-  500-sample replacement never empties one (#65). A rule that binds is needed before H5 is
-  testable.
+- [ ] The official B9 on the grid machine (`configs/repair.yaml`, #64), to confirm the replicate
+  on the grid's own training sets.
 
 ## 6. Limitations
 - **Scale.** DistilGPT-2 (82M) with LoRA on 1,000-sample sets. The bench makes no claim about

@@ -13,9 +13,10 @@
 # fine-tunes, ~75 s each on an RTX 2050, so ~15 min. Decide go/no-go at CP1; the cut-off is
 # 2026-12-15 (pilot must beat random, otherwise report a negative result).
 # The pilot (PR #122) was "go". Full (B9), below: every cell at ratios 0.5 and 1 for
-# synthetic, recursive, paraphrased and benchmark_near, seeds 0-2 = 24 cells x 7 strategies;
-# the 12 pilot rows are reused, so 156 new fine-tunes, ~3.3 h at ~75 s each. Harm scores first:
-#   python -m src.mitigation.harm --config configs/grid.yaml --cells <the 22 new cells>
+# synthetic, recursive, paraphrased and benchmark_near, seeds 0-2 = 24 cells x 7 strategies,
+# plus 3 +rare runs per cell (B10) = 240; the 12 pilot rows are reused, so 228 new fine-tunes,
+# ~4.8 h at ~75 s each. Harm scores first (the 21 cells not scored yet, listed on #64):
+#   python -m src.mitigation.harm --config configs/grid.yaml --cells <the 21 cells>
 #
 # Gate X1 (§11, fixed before results; computed in the summary): harm_guided recovery is at
 # least 10 points above random's at ratio 0.5 on >= 2 of the 3 collapse types, every seed.
@@ -53,10 +54,10 @@ cells:
 pilot_cells: [synthetic_r0.5_s0, recursive_r0.5_s0]
 strategies: [harm_guided, repr_sim, risk_guided, knn_guided, random, perplexity_filter, oracle]
 k: contaminated          # replace as many samples as the cell has contaminated ones (or an integer)
-# Rare-cluster preservation (B10, H5): these strategies also run as <strategy>+rare, never
-# emptying a cluster that is rare in the seed's clean draw (semantic.cluster_assignments).
-# Empty until #65 settles the rule: as written it changes no pick at ratio 0.5 (rehearsal).
-preserve_rare_clusters: []
+# Rare-cluster preservation (B10, H5): these strategies also run as <strategy>+rare, where a
+# cluster rare in the seed's clean draw (semantic.cluster_assignments) loses no larger share of
+# its rows than the set does (k/N), and never its last. Fixed 2026-11-09, before any B9 row (#65).
+preserve_rare_clusters: [harm_guided, risk_guided, random]
 
 device: auto
 models_dir: data/models/repair   # git-ignored; repaired checkpoints are deleted after scoring

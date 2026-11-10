@@ -83,12 +83,23 @@ GRID_ROWS = {
 
 def test_protect_rare_never_empties_a_tail_cluster_within_the_budget():
     labels = [0, 7, 0, 7, 0, 9]  # 7 and 9 are rare (tail) clusters
-    out = protect_rare([5, 1, 3, 0, 2, 4], labels, {7, 9})
-    assert out == [1, 0, 2, 4, 5, 3], "5 is 9's only member and 3 becomes 7's last, so both move to the end"
+    out = protect_rare([5, 1, 3, 0, 2, 4], labels, {7, 9}, k=3)
+    assert out == [1, 0, 2, 4, 5, 3], "5 is 9's only member and 3 would empty 7, so both move to the end"
     assert sorted(out) == list(range(6))
     for k in range(1, 5):
-        assert {7, 9} <= {labels[i] for i in range(6) if i not in out[:k]}
-    assert protect_rare([2, 0, 1], [0, 0, 0], set()) == [2, 0, 1], "no tail clusters: ranking unchanged"
+        top = protect_rare([5, 1, 3, 0, 2, 4], labels, {7, 9}, k)[:k]
+        assert {7, 9} <= {labels[i] for i in range(6) if i not in top}
+    assert protect_rare([2, 0, 1], [0, 0, 0], set(), k=2) == [2, 0, 1], "no tail clusters: ranking unchanged"
+
+
+def test_protect_rare_cuts_a_tail_cluster_no_faster_than_the_set():
+    # the ranking puts 3 of rare cluster 7's 4 rows first; k = half the set, so 7 may lose 2
+    labels = [7, 7, 7, 7, 0, 0, 0, 0]
+    worst = [0, 1, 2, 4, 5, 6, 7, 3]
+    out = protect_rare(worst, labels, {7}, k=4)
+    assert out[:4] == [0, 1, 4, 5], "the third row of 7 waits: its cap is floor(4 * 4 / 8) = 2"
+    # the first rule (only "never the last row") would have let all three go: this one binds
+    assert sum(labels[i] == 7 for i in worst[:4]) == 3
 
 
 def _run(strategies, *, scores=None, done=None, k="contaminated", **kw):
