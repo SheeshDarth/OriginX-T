@@ -7,10 +7,53 @@ const STRATEGIES = [
   "harm_guided",
   "repr_sim",
   "risk_guided",
+  "knn_guided",
   "random",
   "perplexity_filter",
   "oracle",
 ];
+
+export type SeedSummary = {
+  group: string; // cell id without its seed, e.g. "synthetic_r0.5"
+  strategy: string;
+  n: number;
+  mean: number;
+  min: number;
+  max: number;
+  distinct2: number;
+};
+
+/** Each (type, ratio) and strategy across its seeds: mean recovery, its range and mean distinct-2. */
+export function acrossSeeds(rows: RepairResult[]): SeedSummary[] {
+  const groups = new Map<string, RepairResult[]>();
+  for (const r of rows) {
+    if (r.recovery == null) continue;
+    const key = `${r.cell.replace(/_s\d+$/, "")}|${r.strategy}`;
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  return [...groups.entries()].map(([key, rs]) => {
+    const [group, strategy] = key.split("|");
+    const rec = rs.map((r) => r.recovery as number);
+    return {
+      group,
+      strategy,
+      n: rs.length,
+      mean: mean(rec),
+      min: Math.min(...rec),
+      max: Math.max(...rec),
+      distinct2: mean(rs.map((r) => r.distinct_2)),
+    };
+  });
+}
+
+const pct = (x: number) => Math.round(x * 100);
+export const summaryText = (s?: SeedSummary) =>
+  !s
+    ? "—"
+    : s.n < 2
+      ? `${pct(s.mean)}%`
+      : `${pct(s.mean)}% [${pct(s.min)}, ${pct(s.max)}]`;
 
 export const recoveryText = (r?: RepairResult) =>
   !r
@@ -51,8 +94,64 @@ export function Repair() {
       >
         {(rows) => {
           const cells = [...new Set(rows.map((r) => r.cell))];
+          const summary = acrossSeeds(rows);
+          const groups = [...new Set(summary.map((s) => s.group))];
           return (
             <div className="overflow-x-auto">
+              <h2 className="mb-1 font-semibold">Across seeds</h2>
+              <p className="mb-2 text-sm text-muted">
+                Mean recovery over seeds, with the lowest and highest seed in
+                brackets. Hover for distinct-2 of the repaired set (higher =
+                more diverse).
+              </p>
+              <table className="mb-6 w-full text-sm">
+                <caption className="sr-only">
+                  Mean recovery by strategy across seeds
+                </caption>
+                <thead>
+                  <tr className="border-b border-border text-left">
+                    <th scope="col" className="py-1 pr-4">
+                      Type, ratio
+                    </th>
+                    {STRATEGIES.map((s) => (
+                      <th key={s} scope="col" className="py-1 pr-4 font-mono">
+                        {s}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.map((g) => (
+                    <tr key={g} className="border-b border-border">
+                      <th
+                        scope="row"
+                        className="py-1 pr-4 font-mono font-normal"
+                      >
+                        {g}
+                      </th>
+                      {STRATEGIES.map((st) => {
+                        const s = summary.find(
+                          (x) => x.group === g && x.strategy === st,
+                        );
+                        return (
+                          <td
+                            key={st}
+                            className="py-1 pr-4 tabular-nums"
+                            title={
+                              s
+                                ? `${s.n} seed(s), distinct-2 ${s.distinct2.toFixed(3)}`
+                                : undefined
+                            }
+                          >
+                            {summaryText(s)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <h2 className="mb-1 font-semibold">Per cell</h2>
               <table className="w-full text-sm">
                 <caption className="sr-only">
                   Recovery by strategy and cell
