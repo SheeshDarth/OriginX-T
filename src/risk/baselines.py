@@ -70,6 +70,13 @@ def baseline_report(rows: Sequence[Mapping[str, Any]], model_preds: Sequence[Map
         base = single_feature(rows, col, group)
         out[name] = {"column": col, **compare(model_preds, base)} if base else \
             {"column": col, "note": "column not computed yet"}
+        datasets = sorted({r["dataset"] for r in rows})
+        if base and len(datasets) > 1:
+            # pooled, a raw column's level differs by corpus, which can sink the baseline for
+            # reasons unrelated to risk; so the same comparison within each corpus is reported too
+            out[name]["per_dataset"] = {d: {"column": col, **compare(
+                [m for m in model_preds if m["dataset"] == d], [b for b in base if b["dataset"] == d])}
+                for d in datasets}
     singles = {}
     for col in sorted({k for r in rows for k, v in r.items() if k.startswith("f_") and v is not None}):
         preds = single_feature(rows, col, group)

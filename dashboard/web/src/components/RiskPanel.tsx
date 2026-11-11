@@ -52,7 +52,10 @@ export function RiskPanel({
         empty="The risk model has not been run yet."
       >
         {(rows) => {
-          const r = rows.find((x) => x.dataset === dataset && x.cell === cell);
+          // ratio-0 cells only have a leave-one-dataset-out row, which this panel's wording does not describe
+          const r = /_r0_s\d+$/.test(cell)
+            ? undefined
+            : rows.find((x) => x.dataset === dataset && x.cell === cell);
           if (!r)
             return (
               <p className="text-sm text-muted">

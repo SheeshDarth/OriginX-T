@@ -21,11 +21,12 @@ const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 /** H2: did the model beat the reference-LM baseline, with the paired CI of the AUROC difference. */
 export function baselineLine(
   b: RiskEvaluation["baselines"]["ref_lm_loss"],
+  scope = "",
 ): string {
-  if (!b) return "Baseline ref-LM loss: not computed yet";
-  if (b.auroc_baseline == null)
-    return `Baseline ref-LM loss: ${b.note ?? "not comparable"}`;
-  return `Baseline ref-LM loss (AUROC ${b.auroc_baseline.toFixed(2)}): ${b.model_beats_baseline ? "beaten" : "not beaten"}, difference ${est(b.difference, signed)}`;
+  const name = `Baseline ref-LM loss${scope}`;
+  if (!b) return `${name}: not computed yet`;
+  if (b.auroc_baseline == null) return `${name}: ${b.note ?? "not comparable"}`;
+  return `${name} (AUROC ${b.auroc_baseline.toFixed(2)}): ${b.model_beats_baseline ? "beaten" : "not beaten"}, difference ${est(b.difference, signed)}`;
 }
 
 function Stat({
@@ -67,6 +68,10 @@ export function EvaluationCard() {
       >
         {(e) => {
           const t = e.leave_one_type_out;
+          const d = e.leave_one_dataset_out;
+          const perDataset = Object.entries(
+            e.baselines.ref_lm_loss?.per_dataset ?? {},
+          );
           return (
             <>
               <p className="mb-3 text-xs text-muted">
@@ -107,8 +112,25 @@ export function EvaluationCard() {
                 </div>
               )}
               <p className="mt-3 text-sm">
-                {baselineLine(e.baselines.ref_lm_loss)}
+                {baselineLine(
+                  e.baselines.ref_lm_loss,
+                  perDataset.length ? ", both datasets pooled" : "",
+                )}
               </p>
+              {perDataset.map(([name, b]) => (
+                <p key={name} className="text-sm">
+                  {baselineLine(b, `, within ${name}`)}
+                </p>
+              ))}
+              {d?.auroc && (
+                <p className="mt-3 text-sm">
+                  Trained on one dataset, tested on the other ({d.n} datasets):
+                  AUROC <span className="font-mono">{est(d.auroc)}</span>
+                  {d.conformal &&
+                    `, conformal coverage ${est(d.conformal.coverage, pct)}`}
+                  {d.ece != null && `, ECE ${d.ece.toFixed(2)}`}.
+                </p>
+              )}
             </>
           );
         }}

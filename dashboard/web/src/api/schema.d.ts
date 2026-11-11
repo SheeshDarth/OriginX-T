@@ -409,6 +409,10 @@ export interface components {
       n?: number | null;
       /** Note */
       note?: string | null;
+      /** Per Dataset */
+      per_dataset?: {
+        [key: string]: components["schemas"]["BaselineComparison"];
+      } | null;
     };
     /** BenchSample */
     BenchSample: {

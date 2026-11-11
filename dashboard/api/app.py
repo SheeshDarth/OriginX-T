@@ -191,6 +191,7 @@ class BaselineComparison(Model):
     difference: Optional[Estimate] = None
     model_beats_baseline: Optional[bool] = None
     note: Optional[str] = None
+    per_dataset: Optional[dict[str, "BaselineComparison"]] = None  # the same comparison within each corpus (2+ datasets)
 
 
 class RiskBaselines(Model):
