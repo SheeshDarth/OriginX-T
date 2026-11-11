@@ -18,7 +18,9 @@ export function evidence(g: Gate): string {
   }
   if (g.id === "gate_1") {
     const ds = d.datasets as string[];
-    return `features on ${ds.length} of 2 datasets needed (${ds.join(", ")})`;
+    return ds.length >= 2
+      ? `features and baseline ran on ${ds.length} datasets (${ds.join(", ")})`
+      : `features on ${ds.length} of 2 datasets needed (${ds.join(", ")})`;
   }
   if (g.id === "gate_2") {
     return Object.entries(d.types as Record<string, string>)

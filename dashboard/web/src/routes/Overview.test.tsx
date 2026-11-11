@@ -3,8 +3,9 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { Overview } from "./Overview";
+import { Overview, evidence } from "./Overview";
 import { baselineLine, est } from "../components/EvaluationCard";
+import type { Gate } from "../api/client";
 
 // shaped like the real GET /v1/gates on main
 const GATES = [
@@ -177,6 +178,20 @@ test("with two datasets the card adds the within-dataset baselines and the cross
   expect(screen.getByText(/tested on the other \(180 datasets\)/)).toBeTruthy();
   expect(screen.getByText("0.73 [0.65, 0.80]")).toBeTruthy();
   server.resetHandlers();
+});
+
+test("GATE 1 evidence says what ran once both datasets have features", () => {
+  const g1: Gate = {
+    id: "gate_1",
+    name: "GATE 1: risk model",
+    status: "passed",
+    exploratory: false,
+    rule: "r1",
+    details: { datasets: ["tinystories", "wikitext2"] },
+  };
+  expect(evidence(g1)).toBe(
+    "features and baseline ran on 2 datasets (tinystories, wikitext2)",
+  );
 });
 
 test("a missing baseline or estimate reads as such", () => {
