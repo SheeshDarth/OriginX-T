@@ -342,6 +342,20 @@
               }
             ],
             "title": "Note"
+          },
+          "per_dataset": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/BaselineComparison"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Dataset"
           }
         },
         "required": [

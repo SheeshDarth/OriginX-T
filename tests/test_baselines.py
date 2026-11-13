@@ -42,6 +42,23 @@ def test_a_baseline_column_that_does_not_exist_yet_is_reported_not_faked():
     assert report["single_feature_auroc"] == {"f_lex_entropy": 1.0}
 
 
+def test_two_corpora_also_get_the_comparison_within_each_corpus():
+    # the loss column separates perfectly inside each corpus, but tinystories sits 3 nats lower,
+    # so pooled it looks weak: only the per-corpus comparison shows the model merely ties it
+    rows, model = [], []
+    for d, offset in (("wikitext2", 5.0), ("tinystories", 2.0)):
+        for i in range(16):
+            t, y = "a" if i < 8 else "b", i % 2
+            rows.append({**_row(i, t, y, 0.0), "dataset": d, "f_model_loss_mean": offset + y + 0.01 * i})
+            model.append({"dataset": d, "cell": f"c{i}", "fold": f"type={t}", "label": y, "p_degrade": 0.1 + 0.8 * y})
+    report = baseline_report(rows, model)["ref_lm_loss"]
+    assert report["auroc_baseline"] < 1.0
+    per = report["per_dataset"]
+    assert set(per) == {"wikitext2", "tinystories"}
+    assert all(p["auroc_baseline"] == 1.0 and not p["model_beats_baseline"] for p in per.values())
+    assert "per_dataset" not in baseline_report([r for r in rows if r["dataset"] == "wikitext2"], model)["ref_lm_loss"]
+
+
 def test_gate_1_needs_two_datasets_before_it_can_pass():
     assert gate_1(["wikitext2", "wikitext2"], True)["status"] == "not_evaluable"
     assert gate_1(["wikitext2", "tinystories"], True)["status"] == "passed"

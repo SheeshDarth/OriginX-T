@@ -3,8 +3,9 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { Overview } from "./Overview";
+import { Overview, evidence } from "./Overview";
 import { baselineLine, est } from "../components/EvaluationCard";
+import type { Gate } from "../api/client";
 
 // shaped like the real GET /v1/gates on main
 const GATES = [
@@ -122,6 +123,75 @@ test("the evaluation card states AUROC, coverage against its target, n and the b
       "Baseline ref-LM loss (AUROC 0.84): not beaten, difference -0.03 [-0.07, +0.00]",
     ),
   ).toBeTruthy();
+});
+
+test("with two datasets the card adds the within-dataset baselines and the cross-dataset numbers", async () => {
+  const within = (auroc_baseline: number, value: number, beats: boolean) => ({
+    column: "f_model_loss_mean",
+    n: 30,
+    auroc_model: 0.8,
+    auroc_baseline,
+    difference: { value, ci95: [value - 0.03, value + 0.03] },
+    model_beats_baseline: beats,
+  });
+  server.use(
+    http.get("*/v1/risk/evaluation", () =>
+      HttpResponse.json({
+        ...EVALUATION,
+        baselines: {
+          ...EVALUATION.baselines,
+          ref_lm_loss: {
+            ...EVALUATION.baselines.ref_lm_loss,
+            per_dataset: {
+              tinystories: within(0.83, -0.03, false),
+              wikitext2: within(0.84, 0.05, true),
+            },
+          },
+        },
+        leave_one_dataset_out: {
+          ...EVALUATION.leave_one_type_out,
+          n: 180,
+          auroc: { value: 0.73, ci95: [0.65, 0.8] },
+          ece: 0.5,
+        },
+      }),
+    ),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <Overview />
+    </QueryClientProvider>,
+  );
+  expect(
+    await screen.findByText(
+      /^Baseline ref-LM loss, both datasets pooled \(AUROC 0\.84\): not beaten/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Baseline ref-LM loss, within tinystories (AUROC 0.83): not beaten, difference -0.03 [-0.06, +0.00]",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/^Baseline ref-LM loss, within wikitext2 .*: beaten/),
+  ).toBeTruthy();
+  expect(screen.getByText(/tested on the other \(180 datasets\)/)).toBeTruthy();
+  expect(screen.getByText("0.73 [0.65, 0.80]")).toBeTruthy();
+  server.resetHandlers();
+});
+
+test("GATE 1 evidence says what ran once both datasets have features", () => {
+  const g1: Gate = {
+    id: "gate_1",
+    name: "GATE 1: risk model",
+    status: "passed",
+    exploratory: false,
+    rule: "r1",
+    details: { datasets: ["tinystories", "wikitext2"] },
+  };
+  expect(evidence(g1)).toBe(
+    "features and baseline ran on 2 datasets (tinystories, wikitext2)",
+  );
 });
 
 test("a missing baseline or estimate reads as such", () => {

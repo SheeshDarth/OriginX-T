@@ -115,13 +115,16 @@ def test_shapes_the_ui_relies_on(client):
     assert gates[("x3", None)]["status"] == "pending"  # no x3 verdict in the fixture root
     canary = client.get("/v1/x2/canary").json()
     assert canary["rho"] == x2["details"]["rho"] and len(canary["pairs"]) == canary["n_pairs"]
-    g1 = gates[("gate_1", None)]  # from reports/risk/evaluation.json, one dataset so far
-    assert g1["status"] == "not_evaluable" and g1["source"] == "reports/risk/evaluation.json"
+    g1 = gates[("gate_1", None)]  # from reports/risk/evaluation.json: WikiText and TinyStories
+    assert g1["status"] == "passed" and g1["source"] == "reports/risk/evaluation.json"
+    assert g1["details"]["datasets"] == ["tinystories", "wikitext2"]
     assert 0 < g1["details"]["auroc"] < 1 and g1["details"]["coverage_target"] == 0.9
     assert ">= 2 datasets" in g1["rule"]
     ev = client.get("/v1/risk/evaluation").json()
     assert ev["leave_one_type_out"]["auroc"]["value"] == g1["details"]["auroc"]
     assert ev["baselines"]["ref_lm_loss"]["model_beats_baseline"] is g1["details"]["beats_ref_lm_baseline"]
+    assert set(ev["baselines"]["ref_lm_loss"]["per_dataset"]) == {"tinystories", "wikitext2"}
+    assert ev["leave_one_dataset_out"]["n"] > ev["leave_one_type_out"]["n"]  # ratio-0 cells are tested too
 
     log = client.get("/v1/runs/wikitext2_synthetic_r1_s0/trainlog").json()
     assert set(log[0]["signals"]) == {"eff_rank_last", "part_ratio_last", "anisotropy_last",
