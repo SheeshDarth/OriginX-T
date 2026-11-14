@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import hashlib
+import inspect
 import json
 import re
 import threading
@@ -29,7 +30,7 @@ from src.ingestion.loaders import normalize_record
 from src.ingestion.schema import Sample
 
 REPO = Path(__file__).resolve().parents[2]
-API_VERSION = "1.5.0"  # 1.1: audits; 1.2: /runs/{id}/stream; 1.3: /risk/evaluation; 1.4: /runs, /x3/monitor; 1.5: /x2/canary
+API_VERSION = "1.6.0"  # 1.1: audits; 1.2: /runs/{id}/stream; 1.3: /risk/evaluation; 1.4: /runs, /x3/monitor; 1.5: /x2/canary; 1.6: AuditJob.stage, AuditJob.stages
 
 Dataset = Literal["wikitext2", "tinystories"]
 ContaminationType = Literal[CONTAMINATION_TYPES]  # type: ignore[valid-type]
@@ -348,6 +349,13 @@ class SampleScore(Model):
     higher_is: Literal["worse"] = "worse"
 
 
+class StageTime(Model):
+    """When a worker stage began, in seconds since the audit started running; the last entry is "done"."""
+
+    stage: str
+    at: float
+
+
 class AuditJob(Model):
     id: str
     status: Literal["queued", "running", "done", "failed"]
@@ -357,6 +365,8 @@ class AuditJob(Model):
     created_at: str
     finished_at: Optional[str] = None
     error: Optional[str] = None
+    stage: Optional[str] = None            # what the worker is doing now: features/<family>, model, flag, scores/<method>
+    stages: list[StageTime] = []           # every stage the worker has started, in order
     report: Optional[AuditReport] = None   # once done
     scores: Optional[list[SampleScore]] = None
 
@@ -514,7 +524,8 @@ Runner = Callable[[list[Sample], Mapping[str, Any], list[str], list[str]],
 
 
 def run_audit(samples: list[Sample], deployed: Mapping[str, Any], bench: list[str],
-              reference: list[str] = ()) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+              reference: list[str] = (), progress: Callable[[str], None] = lambda stage: None,
+              ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The audit/1 report (``src.risk.audit``) and the two per-sample risk scores (§7.3)."""
     from src.features import model as reflm
     from src.features import semantic
@@ -523,13 +534,14 @@ def run_audit(samples: list[Sample], deployed: Mapping[str, Any], bench: list[st
     from src.risk.audit import audit
 
     texts, ids = [training_text(s) for s in samples], [s.sample_id for s in samples]
-    report = audit(texts, ids, deployed, bench, reference)
+    report = audit(texts, ids, deployed, bench, reference, progress)
     ctx = {"device": _device("auto")}
     scores: list[dict[str, Any]] = []
     for method, per_text, value in (
         ("risk_reflm", reflm.per_text, lambda v: None if v is None else -v["loss"]),
         ("risk_knn", semantic.per_text, lambda v: None if v is None else -v),
     ):
+        progress(f"scores/{method}")
         try:
             values = [value(v) for v in per_text(texts, ctx)]
         except ImportError:  # the family's libraries are not installed on this server
@@ -759,9 +771,19 @@ def create_app(root: Path = REPO, *, runner: Optional[Runner] = None) -> FastAPI
     def work(job_id: str, samples: list[Sample], deployed: Mapping[str, Any], bench: list[str],
              reference: list[str]) -> None:
         update(job_id, status="running")
+        t0, log = time.monotonic(), []
+
+        def note(stage: str) -> None:
+            log.append({"stage": stage, "at": round(time.monotonic() - t0, 2)})
+            update(job_id, stage=stage, stages=list(log))
+
         try:
-            report, scores = run(samples, deployed, bench, reference)
-            update(job_id, status="done", report=report, scores=scores, finished_at=_now())
+            # a runner (tests pass stubs) takes ``progress`` only if it declares it
+            takes_progress = "progress" in inspect.signature(run).parameters
+            extra = {"progress": note} if takes_progress else {}
+            report, scores = run(samples, deployed, bench, reference, **extra)
+            note("done")  # closes the last stage's timing
+            update(job_id, status="done", stage=None, report=report, scores=scores, finished_at=_now())
         except Exception as e:  # the client sees it as the job's error
             update(job_id, status="failed", error=f"{type(e).__name__}: {e}"[:500], finished_at=_now())
 

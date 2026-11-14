@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from ..features import leak as leak_family
 from ..features.lex import lex
@@ -53,7 +53,8 @@ def flag_samples(texts: Sequence[str], ids: Sequence[str], bench: Sequence[str])
 
 
 def audit(texts: Sequence[str], ids: Sequence[str], deployed: Mapping[str, Any],
-          bench: Sequence[str] = (), reference: Sequence[str] = ()) -> dict[str, Any]:
+          bench: Sequence[str] = (), reference: Sequence[str] = (),
+          progress: Callable[[str], None] = lambda stage: None) -> dict[str, Any]:
     """``reference``: clean human texts for the sem family's reference columns (``grid_reference``);
     without them cluster_entropy, mauve and tail_retention are missing."""
     model = LogReg.from_dict(deployed)
@@ -62,13 +63,16 @@ def audit(texts: Sequence[str], ids: Sequence[str], deployed: Mapping[str, Any],
         ctx["reference_texts"] = list(reference)
     feats: dict[str, Any] = {}
     for name, family in FAMILIES.items():
+        progress(f"features/{name}")
         try:
             feats.update(features_for(list(texts), {name: family}, ctx))
         except ImportError:  # a family whose libraries (torch, ...) are not installed: its columns go missing
             pass
+    progress("model")
     p = model.predict([feats])[0]
     q = math.inf if deployed["q"] is None else deployed["q"]
     contrib = model.contributions(feats)
+    progress("flag")
     flagged = flag_samples(texts, ids, bench)
     return {
         "schema": "audit/1",
