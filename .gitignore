@@ -36,6 +36,9 @@ data/models/
 # Dry-run output of configs/grid_smoke.yaml (numbers are meaningless)
 reports/grid_smoke/
 
+# Bench release output (python -m src.bench.release): published, never committed
+/dist/
+
 # Backups written by grid --rerun-types
 reports/**/*.bak-*
 
