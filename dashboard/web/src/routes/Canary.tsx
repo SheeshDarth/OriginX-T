@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import * as Plot from "@observablehq/plot";
 import { api, unwrap, type Canary as CanaryData } from "../api/client";
-import { PlotFigure, TYPE_COLORS, TYPES } from "../components/charts";
+import { PlotFigure, TYPE_COLORS, TYPES, fit } from "../components/charts";
 import { QueryView } from "../components/QueryView";
 
 type Pair = CanaryData["pairs"][number];
@@ -12,7 +12,7 @@ export const rhoText = (c: CanaryData) =>
 
 /** Proxy damage (x) against target damage (y), one dot per matched cell. */
 export function canaryPlot(pairs: Pair[]) {
-  return Plot.plot({
+  const plot = Plot.plot({
     width: 640,
     height: 420,
     marginLeft: 56,
@@ -48,6 +48,7 @@ export function canaryPlot(pairs: Pair[]) {
       ),
     ],
   });
+  return fit(plot, 640, 420);
 }
 
 export function Canary() {
