@@ -328,6 +328,31 @@ def test_cors_allows_the_ui_to_post_and_read_the_location(audits):
     assert "location" in r.headers["access-control-expose-headers"].lower()
 
 
+def test_a_runner_that_takes_progress_reports_its_stage_on_the_job(root):
+    import threading
+    import time
+
+    (root / "reports/risk").mkdir(parents=True, exist_ok=True)
+    (root / "reports/risk/model.json").write_text(json.dumps(DEPLOYED), encoding="utf-8")
+    seen, located = [], threading.Event()
+
+    def runner(samples, deployed, bench, reference, progress):
+        progress("features/lex")
+        located.wait(5)  # the test knows the job id only after the POST returns
+        seen.append(c.get(location).json()["stage"])  # read the job while the runner is inside it
+        return _report(len(samples)), []
+
+    c = TestClient(api.create_app(root, runner=runner))
+    location = c.post("/v1/audits", content=JSONL).headers["location"]
+    located.set()
+    deadline = time.time() + 10
+    while c.get(location).json()["status"] != "done" and time.time() < deadline:
+        time.sleep(0.05)
+    job = c.get(location).json()
+    assert seen == ["features/lex"] and job["status"] == "done" and job["stage"] is None
+    assert [s["stage"] for s in job["stages"]] == ["features/lex", "done"] and job["stages"][0]["at"] >= 0
+
+
 def test_the_default_runner_wires_the_audit_and_both_scores(monkeypatch):
     from src.features import model as reflm
     from src.features import semantic
@@ -340,7 +365,10 @@ def test_the_default_runner_wires_the_audit_and_both_scores(monkeypatch):
     monkeypatch.setattr(semantic, "per_text", lambda texts, ctx: [0.25, 0.5])
     samples = [Sample(sample_id="x", response="the quick brown fox jumps"),
                Sample(sample_id="y", response="the quick brown fox jumps over the lazy dog")]
-    report, scores = api.run_audit(samples, DEPLOYED, ["the quick brown fox jumps over the lazy dog"])
+    stages = []
+    report, scores = api.run_audit(samples, DEPLOYED, ["the quick brown fox jumps over the lazy dog"],
+                                   progress=stages.append)
+    assert stages == ["features/lex", "features/leak", "model", "flag", "scores/risk_reflm", "scores/risk_knn"]
     assert api.AuditReport.model_validate(report).n_samples == 2
     assert report["n_flagged"] == 1 and report["flagged"][0]["sample_id"] == "y"  # the benchmark copy
     assert scores == [{"sample_id": "x", "method": "risk_reflm", "score": -2.0},

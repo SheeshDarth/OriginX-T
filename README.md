@@ -37,7 +37,7 @@ fully visible. It blends three ideas into one coherent system: **ORIGIN**
 | 2 | Feature suite (lexical, leakage, reference-LM, semantic incl. MAUVE) | Committed | Done on WikiText; TinyStories waits for its grid |
 | 3 | LoRA fine-tuning grid + collapse-curve measurement | Committed | Done on WikiText (75 cells); TinyStories next |
 | 4 | Calibrated risk classifier (degrade / no-degrade) | Committed | Done on WikiText; GATE 1 needs a second dataset |
-| 5 | Split-conformal risk guarantee | Gated | Built; under-covers on WikiText (0.72 vs 0.90) |
+| 5 | Split-conformal risk guarantee | Gated | Built; under-covers (0.81 vs 0.90 on both datasets) |
 | 6 | Discrete-time survival early-warning model | Gated | Not started (only if CP2 is green) |
 | 7 | White-box representational-collapse signals (effective rank, anisotropy) | Gated | Done on 66 checkpoints, and live during training (X3) |
 | 8 | Causal attribution (Shapley) + collapse scaling law | Gated | Not started |
@@ -179,18 +179,19 @@ fixed before its results existed ([TRD §11](docs/TRD.md#11-gono-go-gates), HAND
 | Gate | Rule (short) | Verdict | Evidence |
 |---|---|---|---|
 | GATE 0 | Recursive self-training raises holdout ppl on every seed | **Passed** | 3/3 seeds, 56.3 → 67.6 ([#8](https://github.com/SheeshDarth/OriginX-T/pull/8)) |
-| GATE 1 | Feature suite + static baseline run cleanly on ≥ 2 datasets | **Not evaluable** | WikiText evaluated; the TinyStories grid, features and scores now exist (#126), the risk evaluation on both datasets is pending (Track A) ([#94](https://github.com/SheeshDarth/OriginX-T/pull/94), [#105](https://github.com/SheeshDarth/OriginX-T/pull/105)) |
+| GATE 1 | Feature suite + static baseline run cleanly on ≥ 2 datasets | **Passed 2026-11-11** | Feature suite and static baseline ran on WikiText and TinyStories; the risk model was evaluated on both (#140) ([#94](https://github.com/SheeshDarth/OriginX-T/pull/94), [#105](https://github.com/SheeshDarth/OriginX-T/pull/105)) |
 | GATE 2 | Dose-response, above seed noise at ratio 0.25 | **Passed** on WikiText and TinyStories | 75-cell WikiText grid and 105-cell TinyStories grid (#126; [#11](https://github.com/SheeshDarth/OriginX-T/pull/11), [#12](https://github.com/SheeshDarth/OriginX-T/pull/12), [#73](https://github.com/SheeshDarth/OriginX-T/pull/73)) |
 | GATE 3 | A white-box signal warns before collapse | **Failed** (WikiText, then the confirmatory run on TinyStories 2026-11-08) | No signal beats the permutation bar (AUROC 0.08-0.56); `reports/grid_tinystories/earlywarning.json` |
 | X1 | Harm-guided repair beats random by ≥ 10 pts | **Passed** on the independent-pool replicate | Full grid (240 retrains, #136): harm − random 0.25-0.55 on all 9 ratio-0.5 cells; harm − origin −0.03 [−0.07, +0.01], no difference; on benchmark near-copies harm recovers nothing. Pilot on the grid's pools: [#122](https://github.com/SheeshDarth/OriginX-T/pull/122) |
 | X2 | Small-model canary predicts a bigger model's damage (ρ ≥ 0.7) | **Passed 2026-11-08** | Spearman ρ 0.78, CI [0.51, 0.91], 24 pairs, Pythia-410M target; `reports/x2/gate_x2.json` |
 | X3 | Live alarm before the breach at a calibrated 5% FA | **Failed 2026-11-08** | Early alarm 44% (bar 50%), false alarms 6% (bar 10%); `reports/x3/gate_x3.json`;  Monitor, data, pre-registered plan ([#98](https://github.com/SheeshDarth/OriginX-T/pull/98), [#110](https://github.com/SheeshDarth/OriginX-T/pull/110)) |
 
-**Risk model (WikiText, 2026-11-01, [#105](https://github.com/SheeshDarth/OriginX-T/pull/105)).**
-Leave-one-type-out AUROC **0.84** [0.72, 0.94], ECE 0.22. The conformal sets **under-cover**:
-0.72 against the 0.90 target. And the full model only **ties** the single reference-LM loss
-feature (difference +0.001, CI [0, 0.008]): H2 ("a multi-feature model beats a simple
-detector") is not shown yet. Prior art also narrowed the novelty claim: predicting a
+**Risk model (both datasets, 2026-11-11, [#140](https://github.com/SheeshDarth/OriginX-T/pull/140)).**
+Leave-one-type-out AUROC **0.83** [0.76, 0.90], ECE 0.17, GATE 1 passed. The conformal sets still
+**under-cover**: 0.81 against the 0.90 target. Pooled, the model beats a raw GPT-2-loss baseline,
+but that margin comes from the baseline sitting at a different level on each corpus; within a
+corpus the model and the single feature are within 0.03 AUROC, so H2 ("a multi-feature model
+beats a simple detector") is not shown. Prior art also narrowed the novelty claim: predicting a
 fine-tuning outcome before training is published (TuneAhead, ICML 2026), so ORIGIN-T's
 claim is contamination-caused degradation with conformal sets on a ground-truth testbed
 ([docs/STRETCH_GOALS.md](docs/STRETCH_GOALS.md), [#112](https://github.com/SheeshDarth/OriginX-T/pull/112)).
