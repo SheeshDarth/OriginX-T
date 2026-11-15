@@ -11,9 +11,10 @@ runs over a ratio grid on two datasets (WikiText-2, TinyStories; DistilGPT-2 wit
 pre-registered go/no-go gates fixed before their results existed. Damage is real and dose-dependent
 on both datasets, and caused by the contamination: on WikiText-2, hidden-holdout perplexity rises
 from 56.6 to 67.6 (synthetic) and 68.4 (recursive) at full contamination while a human-text control
-stays flat. A dataset-level risk model reaches a leave-one-type-out AUROC of 0.84, but its conformal
-sets under-cover (0.72 against 0.90) and it only ties a single reference-LM loss feature, so we do
-not claim that a multi-feature model beats a simple detector. White-box training signals separate
+stays flat. A dataset-level risk model reaches a leave-one-type-out AUROC of 0.83 on both datasets together
+(GATE 1 passed), but its conformal sets under-cover (0.81 against 0.90) and, within a single
+corpus, it is no better than one reference-LM loss feature, so we do not claim that a
+multi-feature model beats a simple detector. White-box training signals separate
 contaminated from clean runs, yet the early-warning gate failed on both datasets, and a live,
 conformally calibrated alarm met its false-alarm bar (6%) but missed its early-alarm bar (44%
 against 50%). A small model's damage does predict a larger model's: Spearman rho 0.78, 95% CI
@@ -55,9 +56,10 @@ is provisional until the TinyStories grid):
   the human-control arm stays at 56.4 (Track C §2; GATE 2 passed).
 - A reference language model finds generated text per sample (AUROC 0.98 for recursive), and a
   nearest-neighbour score finds leaked near-copies (0.97) (Track A §1; #92).
-- A dataset-level risk model reaches leave-one-type-out AUROC 0.84 [0.72, 0.94], but its
-  conformal sets under-cover (0.72 against a 0.90 target) and it only ties the single best
-  feature (Track A; #105). We report H2 ("a multi-feature model beats a simple detector") as
+- A dataset-level risk model reaches leave-one-type-out AUROC 0.83 [0.76, 0.90] across
+  WikiText-2 and TinyStories (GATE 1 passed), but its conformal sets under-cover (0.81 against a
+  0.90 target), it misses `benchmark_near`, and within each corpus it is within 0.03 AUROC of
+  the single best feature (Track A §4b; #140). We report H2 ("a multi-feature model beats a simple detector") as
   *not shown*.
 - White-box signals separate contaminated from clean runs (anisotropy falls, 0.935 → 0.902) but
   the early-warning gate failed on WikiText and again on the confirmatory TinyStories run
@@ -144,7 +146,7 @@ repeat it on Semantic Scholar shortly before submission.
 
 ## 3. Track A: predicting damage from the data
 
-*Revanth. Every number cites the committed file it comes from. Draft of 2026-11-01, WikiText-2 only.*
+*Revanth. Every number cites the committed file it comes from. Draft of 2026-11-01 (WikiText-2); §4b added 2026-11-11 (both datasets, GATE 1).*
 
 ### 3.1 Features
 
@@ -192,7 +194,8 @@ them), so they're excluded from its test fold.
 
 ### 3.4 Results (WikiText-2, leave-one-type-out, n = 60, 95% bootstrap CIs)
 
-Source: `reports/risk/evaluation.json`, `reports/risk/predictions.jsonl`.
+Source: `python -m src.risk.classifier --datasets wikitext2` (the committed `reports/risk/` held these
+until 2026-11-11, `main` at `c3f409a`; it now holds the two-dataset run of §4b).
 
 | Metric | Value |
 |---|---|
@@ -229,7 +232,43 @@ Source: `reports/risk/evaluation.json`, `reports/risk/predictions.jsonl`.
    0.14 (`reports/risk/crosscheck.json`). It's a candidate to **pre-register** for TinyStories,
    not a replacement chosen after looking (HANDBOOK §3.4).
 
-### 3.5 System: the audit and the console
+### 3.5 4b. Both datasets: GATE 1 and leave-one-dataset-out (2026-11-11)
+
+`python -m src.risk.classifier --datasets wikitext2 tinystories` → `reports/risk/evaluation.json`.
+Same code, label and folds as §4; nothing was changed after the TinyStories results were seen.
+TinyStories features: `reports/features/tinystories.jsonl` (105 cells, Track C, #126).
+
+**GATE 1: passed.** The feature suite and the static baseline ran cleanly on both datasets.
+
+| Leave-one-type-out, both datasets pooled (n = 150, 98 degraded) | Value |
+|---|---|
+| AUROC | **0.83** [0.76, 0.90] |
+| ECE | 0.17 |
+| Conformal coverage (target 0.90) | **0.81** [0.75, 0.87], mean set size 1.05 |
+| vs mean-GPT-2-loss, pooled | +0.18 [0.10, 0.27]: beaten by the rule |
+| vs mean-GPT-2-loss, within WikiText (n = 60) | +0.02 [0.004, 0.05]: beaten, narrowly |
+| vs mean-GPT-2-loss, within TinyStories (n = 90) | −0.03 [−0.07, 0.00]: **not beaten** |
+
+**Reading:**
+1. **H2 is not shown.** Pooled, the model clears the pre-registered bar, but that margin comes
+   from the baseline: a raw GPT-2 loss sits at a different level on each corpus, so pooled it
+   ranks the corpora, not the risk. Within each corpus the model and the one feature are within
+   0.03 of each other. We report the within-corpus numbers as the honest reading
+   (`baselines.ref_lm_loss.per_dataset`).
+2. **benchmark_near is still missed on both datasets** (mean p 0.00, 16 of 30 cells degraded).
+   The audit's rule-based leak flag stays necessary.
+3. **Leave-one-dataset-out** (train on one corpus, test every cell of the other, n = 180):
+   AUROC 0.73 [0.65, 0.80], ECE 0.50, coverage 0.50 [0.43, 0.57]. Split by the test corpus,
+   the *ranking* transfers almost perfectly (AUROC 0.99 on each), but the *level* does not:
+   trained on TinyStories it calls WikiText safe (mean p 0.04); trained on WikiText it calls
+   TinyStories degraded (mean p 1.00). The pooled AUROC is low because two shifted scales are
+   mixed. A new corpus therefore needs recalibration on a few labelled cells before its
+   p(degrade) or conformal sets can be trusted. That is a limitation of the deployed model, not
+   a tuning step (§3.4).
+4. **The deployed model** (`reports/risk/model.json`) is now fitted on both grids
+   (120 fitting cells, 60 calibration cells).
+
+### 3.6 System: the audit and the console
 
 - `python -m src.risk.audit data.jsonl --grid configs/grid.yaml` and `POST /v1/audits` apply the
   deployed model (`reports/risk/model.json`; 50 fitting cells, 25 calibration cells, q = 0.36) to
@@ -244,15 +283,15 @@ Source: `reports/risk/evaluation.json`, `reports/risk/predictions.jsonl`.
   Audit screen. `pnpm e2e` drives these flows in a real browser, in light and dark mode,
   against WCAG 2 AA (axe).
 
-### 3.6 Limitations
+### 3.7 Limitations
 
 - **Small n:** 60 test cells from one corpus and one 82M-parameter model. The CIs are wide.
 - **Size dependence:** the label and features come from 1000-sample sets; type-token ratio and
   distinct-n depend on size, so an audit is only in distribution near that size.
 - **Paraphrase caveat:** base DistilGPT-2 paraphrases are closer to prompted continuations
   (HANDBOOK §14.10).
-- **Next:** GATE 1 needs the TinyStories grid (CP1). There, the model, its baselines and XGBoost
-  are compared under a rule fixed before the results exist.
+- **Cross-corpus calibration:** probabilities do not transfer between corpora (§4b.3).
+- **XGBoost** was never pre-registered for TinyStories, so it stays descriptive.
 
 ## 4. Track B: contaminated data, the bench, and repair by harm
 
@@ -656,8 +695,10 @@ These are the cross-cutting limits. Each track section lists its own.
 - **Contamination is injected at known ratios into a clean base.** Real datasets mix sources
   unevenly and the ratio is unknown, so deployment would need an estimate, as repair budget
   *k* does too.
-- **The risk model is not yet sound.** Conformal coverage is 0.72 against 0.90, and it ties a
-  single feature. We do not claim a calibrated guarantee for the dataset-level risk (Track A).
+- **The risk model is not yet sound.** Conformal coverage is 0.81 against 0.90, the ranking
+  transfers across datasets but the level does not (leave-one-dataset-out coverage 0.50), and
+  within a corpus it matches a single feature. We do not claim a calibrated guarantee for the
+  dataset-level risk (Track A §4b).
 - **Early warning:** GATE 3 failed on its pre-registered rule and on the confirmatory run, and
   the anisotropy finding runs opposite to the registered direction and is exploratory.
   Within a run the loss never rises, so "breach" means a gap from healthy runs and needs
@@ -674,7 +715,7 @@ These are the cross-cutting limits. Each track section lists its own.
 ORIGIN-T shows, on a testbed where the answer is known, that contamination causes dose-dependent
 damage that a small proxy model ranks well (X2 passed) and that a reference language model detects
 per sample. It also shows what does not yet work: the dataset-level risk model is not calibrated
-(0.72 coverage against 0.90) and does not beat its best single feature, white-box signals give no
+(0.81 coverage against 0.90) and, within a corpus, does not beat its best single feature, white-box signals give no
 early warning on the contamination-ratio axis (GATE 3 failed twice), and the live alarm misses
 too many collapsing runs at the 10-step logging resolution (X3 failed), although its false-alarm
 rate held. In the full repair grid, harm-guided repair beats random but not cleaning by origin, and

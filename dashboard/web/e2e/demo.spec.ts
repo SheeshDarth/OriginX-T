@@ -20,7 +20,7 @@ async function noA11yViolations(page: Page) {
 test("overview: the gate board shows the committed verdicts", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/overview");
   const gate2 = page.getByRole("row", {
     name: /GATE 2: dose-response wikitext2/,
   });
@@ -144,5 +144,104 @@ test("canary: the X2 verdict and one dot per matched cell", async ({
   await expect
     .poll(() => page.locator('figure svg [aria-label="dot"] path').count())
     .toBe(24);
+  await noA11yViolations(page);
+});
+
+test("demo: hero, try it now, sample, stages, verdict with explanation", async ({
+  page,
+}) => {
+  // the job API is stubbed (a real audit needs the models loaded); the page, samples and
+  // the other endpoints are real
+  const report = {
+    schema: "audit/1",
+    n_samples: 1000,
+    model: "logreg@1",
+    p_degrade: 0.97,
+    conformal_set: [1],
+    alpha: 0.1,
+    features: {},
+    missing_features: [],
+    contributions: [
+      { feature: "f_model_loss_std", value: 1.1, contribution: 4.5 },
+      { feature: "f_lex_ttr", value: 0.5, contribution: -0.9 },
+    ],
+    n_flagged: 1,
+    flagged: [
+      {
+        index: 3,
+        sample_id: "d-3",
+        text: "leaked text",
+        benchmark_similarity: 0.98,
+        repeat_3gram: 0.1,
+        reasons: ["near-copy of a benchmark item (similarity 0.98)"],
+      },
+    ],
+  };
+  const scores = Array.from({ length: 60 }, (_, i) => ({
+    sample_id: `s${i}`,
+    method: "risk_reflm",
+    score: -4 + (i % 20) / 10,
+    higher_is: "worse",
+  }));
+  const job = {
+    id: "e".repeat(32),
+    name: "half_recursive.jsonl",
+    n_samples: 1000,
+    created_at: "now",
+    stage: null,
+    stages: [
+      { stage: "features/lex", at: 0.3 },
+      { stage: "features/leak", at: 0.5 },
+      { stage: "features/model", at: 2.1 },
+      { stage: "features/sem", at: 4.0 },
+      { stage: "model", at: 5.2 },
+      { stage: "flag", at: 5.3 },
+      { stage: "scores/risk_reflm", at: 5.4 },
+      { stage: "done", at: 8.9 },
+    ],
+  };
+  // axe reads the colours mid-fade otherwise; reduced motion also proves the page works without animation
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  let polls = 0;
+  await page.route("**/v1/audits", (r) =>
+    r.fulfill({ status: 202, json: { ...job, status: "queued", stages: [] } }),
+  );
+  await page.route("**/v1/audits/*", (r) =>
+    r.fulfill({
+      json:
+        ++polls < 2
+          ? { ...job, status: "running", stage: "features/lex", stages: [] }
+          : { ...job, status: "done", report, scores },
+    }),
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { level: 1, name: /Know whether a dataset/ }),
+  ).toBeVisible();
+  await expect(page.getByText(/passed · \d+ failed/)).toBeVisible(); // the failures are shown too
+  await noA11yViolations(page);
+
+  await page.getByRole("link", { name: "Try it now" }).click();
+  await expect(page).toHaveURL(/\/try$/);
+  await page
+    .getByRole("button", { name: /Half recursively generated/ })
+    .click();
+  await expect(page.getByText("1,000 records")).toBeVisible();
+  await noA11yViolations(page);
+  await page.getByRole("button", { name: "Run the audit" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Analysing your dataset" }),
+  ).toBeVisible();
+  await expect(page.getByText("Reference language model")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Likely to degrade a model fine-tuned on it",
+    }),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("97%", { exact: true })).toBeVisible();
+  await expect(page.getByText("Flagged samples: 1 of 1,000")).toBeVisible();
+  await expect(page.getByText(/not a guarantee/)).toBeVisible();
   await noA11yViolations(page);
 });

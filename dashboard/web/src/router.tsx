@@ -12,19 +12,23 @@ import { Bench } from "./routes/Bench";
 import { Canary } from "./routes/Canary";
 import { CellDetail } from "./routes/CellDetail";
 import { Curves } from "./routes/Curves";
+import { Home } from "./routes/Home";
 import { Monitor } from "./routes/monitor/Monitor";
 import { Overview } from "./routes/Overview";
 import { Repair } from "./routes/Repair";
+import { Try } from "./routes/try/Try";
 
 const COMMANDS: Command[] = [
-  { label: "Overview", to: "/" },
+  { label: "Home", to: "/" },
+  { label: "Try it: audit a dataset", to: "/try" },
+  { label: "Evidence: gate board", to: "/overview" },
   { label: "Collapse curves", to: "/curves" },
   { label: "Audit a dataset", to: "/audit" },
   { label: "Live monitor (X3)", to: "/monitor" },
   { label: "Canary (X2)", to: "/canary" },
   ...["gate_0", "gate_1", "gate_2", "gate_3", "x1", "x2", "x3"].map((id) => ({
     label: `Gate ${id.replace("gate_", "").toUpperCase()}`,
-    to: "/",
+    to: "/overview",
     hash: id,
   })),
   // every WikiText cell; the palette jumps straight to its detail page
@@ -42,14 +46,18 @@ const root = createRootRoute({
   component: () => (
     <div className="min-h-screen">
       <header className="flex items-center gap-6 border-b border-border bg-surface px-4 py-2">
-        <span className="font-mono text-sm font-semibold">ORIGIN-T</span>
-        <nav aria-label="Main" className="flex gap-4 text-sm">
-          <Link
-            to="/"
-            activeOptions={{ exact: true }}
-            className="text-muted [&.active]:text-fg"
-          >
-            Overview
+        <Link to="/" className="shrink-0 font-mono text-sm font-semibold">
+          ORIGIN-T
+        </Link>
+        <nav
+          aria-label="Main"
+          className="flex min-w-0 gap-4 overflow-x-auto whitespace-nowrap text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <Link to="/try" className="text-muted [&.active]:text-fg">
+            Try it
+          </Link>
+          <Link to="/overview" className="text-muted [&.active]:text-fg">
+            Evidence
           </Link>
           <Link to="/curves" className="text-muted [&.active]:text-fg">
             Collapse curves
@@ -70,7 +78,9 @@ const root = createRootRoute({
             Canary
           </Link>
         </nav>
-        <kbd className="ml-auto font-mono text-xs text-muted">Ctrl K</kbd>
+        <kbd className="ml-auto hidden shrink-0 font-mono text-xs text-muted sm:block">
+          Ctrl K
+        </kbd>
       </header>
       <main className="mx-auto max-w-6xl p-4">
         <Outlet />
@@ -81,7 +91,13 @@ const root = createRootRoute({
 });
 
 export const routeTree = root.addChildren([
-  createRoute({ getParentRoute: () => root, path: "/", component: Overview }),
+  createRoute({ getParentRoute: () => root, path: "/", component: Home }),
+  createRoute({ getParentRoute: () => root, path: "/try", component: Try }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/overview",
+    component: Overview,
+  }),
   createRoute({ getParentRoute: () => root, path: "/audit", component: Audit }),
   createRoute({
     getParentRoute: () => root,

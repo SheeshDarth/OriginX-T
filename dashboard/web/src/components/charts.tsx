@@ -34,3 +34,15 @@ export function PlotFigure({
     </figure>
   );
 }
+
+/** Let a fixed-size Plot figure shrink with its container (phones) instead of overflowing. */
+export function fit<T extends SVGSVGElement | HTMLElement>(
+  plot: T,
+  width: number,
+  height: number,
+): T {
+  plot.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  plot.style.maxWidth = "100%";
+  plot.style.height = "auto";
+  return plot;
+}

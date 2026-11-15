@@ -355,6 +355,13 @@ export interface components {
       report?: components["schemas"]["AuditReport"] | null;
       /** Scores */
       scores?: components["schemas"]["SampleScore"][] | null;
+      /** Stage */
+      stage?: string | null;
+      /**
+       * Stages
+       * @default []
+       */
+      stages: components["schemas"]["StageTime"][];
       /**
        * Status
        * @enum {string}
@@ -835,6 +842,16 @@ export interface components {
       sample_id: string;
       /** Score */
       score: number | null;
+    };
+    /**
+     * StageTime
+     * @description When a worker stage began, in seconds since the audit started running; the last entry is "done".
+     */
+    StageTime: {
+      /** At */
+      at: number;
+      /** Stage */
+      stage: string;
     };
     /**
      * TrainlogRow

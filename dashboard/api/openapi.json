@@ -165,6 +165,25 @@
             ],
             "title": "Scores"
           },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "stages": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StageTime"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
           "status": {
             "enum": [
               "queued",
@@ -1501,6 +1520,25 @@
         "title": "SampleScore",
         "type": "object"
       },
+      "StageTime": {
+        "description": "When a worker stage began, in seconds since the audit started running; the last entry is \"done\".",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "number"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "at"
+        ],
+        "title": "StageTime",
+        "type": "object"
+      },
       "TrainlogRow": {
         "description": "\u00a77.6, with the ``sig_`` columns gathered into ``signals`` (prefix dropped).",
         "properties": {
@@ -1641,7 +1679,7 @@
   "info": {
     "description": "Read-only access to ORIGIN-T's reports (HANDBOOK \u00a77.7). Errors are RFC 7807 problem+json. Responses carry a weak ETag; send it as If-None-Match for a 304.",
     "title": "ORIGIN-T API",
-    "version": "1.5.0"
+    "version": "1.6.0"
   },
   "openapi": "3.1.0",
   "paths": {
