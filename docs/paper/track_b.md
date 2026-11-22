@@ -10,7 +10,7 @@ sample is made by us and carries its origin in `source` (`src/ingestion/schema.p
 seed, one draw of human WikiText-2 text is split in two disjoint halves (`grid.draw_human`).
 The first half is the clean training data. The second is the *source* that contamination is
 made from, so a contaminated sample never shares text with a clean one in the same mixture.
-- **synthetic:** pretrained DistilGPT-2 continues each source text (generation 1).
+- **synthetic:** pretrained DistilGPT-2 [sanh19] continues each source text (generation 1).
 - **recursive:** a model fine-tuned on the synthetic pool writes generation 2: the
   collapse-spike recipe, at depth 2.
 - **paraphrased:** DistilGPT-2 asked to rewrite each source text. The base model cannot
@@ -59,15 +59,15 @@ damage than replacing the ones that *look* machine-written?
 
 **Harm scores** (`src/mitigation/harm.py`, §7.3 `scores/1`), computed at each cell's trained
 checkpoint. Both are negated cosines, so higher means more harmful:
-- **harm_lora_grad** (TracIn-style, one checkpoint): −cos(∇ℓ(sample), ∇ℓ̄(target)). A step
+- **harm_lora_grad** (TracIn-style [pruthi20], one checkpoint): −cos(∇ℓ(sample), ∇ℓ̄(target)). A step
   on a sample whose gradient opposes the held-out gradient raises held-out loss. Gradients
-  are taken w.r.t. a fresh rank-8 LoRA adapter on the merged checkpoint. Its zero-initialised
+  are taken w.r.t. a fresh rank-8 LoRA adapter [hu22lora] on the merged checkpoint. Its zero-initialised
   B matrices receive the full weight gradient projected through a fixed random A, about 110k
   numbers per sample. Cosine is used rather than the dot product so short texts don't dominate
-  (LESS, Xia et al. 2024).
+  [xia24less].
 - **harm_repr_sim:** −cos between a sample's mean-pooled last hidden state and the held-out
   centroid, after removing the mean of all embeddings. This is the representation baseline
-  that beat influence functions at flagging harmful fine-tuning data, so it is mandatory.
+  that beat influence functions at flagging harmful fine-tuning data [li24influence], so it is mandatory.
 
 **The target is not the test set.** Recovery is measured on the grid's 200 hidden-holdout
 evaluation texts. The harm target is a *disjoint* draw of 200 texts from the rest of the
@@ -231,7 +231,7 @@ the official CI excludes zero in origin cleaning's favour and the replicate's di
 ## 6. Limitations
 - **Scale.** DistilGPT-2 (82M) with LoRA on 1,000-sample sets. The bench makes no claim about
   large models.
-- **One checkpoint.** TracIn is usually summed over several checkpoints. We score only at the
+- **One checkpoint.** TracIn [pruthi20] is usually summed over several checkpoints. We score only at the
   end of a one-epoch fine-tune, and influence is known to change during training.
 - **The budget k uses the true contamination count.** Every strategy gets the same k, so the
   comparison is fair, but a deployed cleaner would have to estimate it.

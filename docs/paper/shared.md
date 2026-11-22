@@ -122,7 +122,7 @@ predict *damage*, and finds that a single reference-LM loss feature carries most
 
 **Data attribution and repair.** Influence functions are fragile for LLMs and a representation
 baseline can beat them ([li24influence; luo26reweight]); LoRA-gradient selection is cheap [xia24less], and attribution-guided
-removal followed by retraining exists for *safety* degradation [reddy26; li25rept; unverified-A9]; attribution also removes the effect only unreliably in a subliminal-learning
+removal followed by retraining exists for *safety* degradation [reddy26; li25rept; he24safe]; attribution also removes the effect only unreliably in a subliminal-learning
 test [weckbecker26]. Our X1
 applies the recipe to collapse and contamination damage with ground-truth labels and compares it
 head to head with origin cleaning.

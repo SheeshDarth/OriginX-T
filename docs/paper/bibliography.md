@@ -6,7 +6,9 @@ checked, so nobody upgrades a preprint to a venue from memory:*
   (`docs/LITERATURE_SURVEY.md`; the survey's own honesty note applies).
 - ***abstract***: the arXiv abstract page was fetched on 2026-11-09, and title, first author, date
   and venue are as it states.
-- ***unverified***: taken from `docs/STRETCH_GOALS.md` without a check. Verify before submission.
+- ***search***: title, authors and venue confirmed by a web search on 2026-11-22 (one search per
+  entry, results from the publisher, proceedings or arXiv listing; the full text was not read).
+- ***unverified***: taken from `docs/STRETCH_GOALS.md` without a check. None left.
 
 Authors are the first author and "et al." until the final formatting pass. A `preprint` has no
 confirmed venue: say "preprint" in the paper.
@@ -30,7 +32,7 @@ confirmed venue: say "preprint" in the paper.
 | kang25 | Kang et al. Demystifying Synthetic Data in LLM Pre-training. EMNLP 2025 (Main) | survey |
 | du25 | Du et al. Characterizing Model Behavior Under Synthetic Data Training. arXiv:2510.05133, 2025 (preprint) | survey |
 | feng24 | Feng et al. Beyond Model Collapse: Scaling Up with Synthesized Data Requires Verification. arXiv:2406.07515, 2024 (preprint) | survey |
-| yi25 | Yi et al. Escaping Model Collapse via Synthetic Data Verification: Near-term Improvements and Long-term Convergence. arXiv:2510.16657, 2025. `STRETCH_GOALS.md` lists an ICLR 2026 version | survey (arXiv); ICLR version unverified |
+| yi25 | Yi et al. Escaping Model Collapse via Synthetic Data Verification: Near-term Improvements and Long-term Convergence. arXiv:2510.16657, 2025; also in the ICLR 2026 program (poster) | survey (arXiv); ICLR 2026 poster: search |
 | drayson25 | Drayson, Yilmaz and Lampos. Machine-generated text detection prevents language model collapse. EMNLP 2025 (Main), arXiv:2502.15654 | survey |
 
 ## Benchmark contamination
@@ -59,7 +61,8 @@ confirmed venue: say "preprint" in the paper.
 | xia24less | Xia et al. LESS: Selecting Influential Data for Targeted Instruction Tuning. ICML 2024 | abstract |
 | reddy26 | Reddy et al. Follow the Gradient: Tracing Safety Degradation Back to Training Data. arXiv:2610.37481, 2026-10-27 (preprint) | abstract |
 | li25rept | Li et al. Where Did It Go Wrong? Attributing Undesirable LLM Behaviors via Representation Gradient Tracing. arXiv:2510.02334, 2025 (preprint) | abstract |
-| unverified-A9 | "Identifying Benign Data that Breaks Safety", OpenReview x3ceCulAsa. Authors, venue and year unchecked (the page would not load) | **unverified**: find it or drop it |
+| he24safe | He, Xia and Henderson. What's in Your "Safe" Data? Identifying Benign Data that Breaks Safety. arXiv:2404.01099, 2024; presented at ICLR 2024 workshops (the earlier key was `unverified-A9`) | search |
+| pruthi20 | Pruthi et al. Estimating Training Data Influence by Tracing Gradient Descent (TracIn). NeurIPS 2020, arXiv:2002.08484 | search |
 | weckbecker26 | Weckbecker et al. Can Data Attribution Filter Out Subliminal Learning? Not Reliably. arXiv:2609.20027, 2026-09-17 (preprint) | abstract |
 
 ## Predicting fine-tuning outcomes and scale transfer
@@ -79,18 +82,31 @@ confirmed venue: say "preprint" in the paper.
 | wiegrebe24 | Wiegrebe et al. Deep Learning for Survival Analysis: A Review. *Artificial Intelligence Review* 57, art. 65, 2024 | survey |
 | zhou26mamba | Zhou et al. Δt-Mamba3D: A Time-Aware Spatio-Temporal State-Space Model for Breast Cancer Risk Prediction. AAAI 2026 | survey |
 
+## Models and methods we use
+| Key | Reference | Status |
+|---|---|---|
+| radford19 | Radford et al. Language Models are Unsupervised Multitask Learners (GPT-2). OpenAI technical report, 2019 (no arXiv version) | search |
+| sanh19 | Sanh et al. DistilBERT, a distilled version of BERT: smaller, faster, cheaper and lighter. arXiv:1910.01108, 2019 (NeurIPS 2019 EMC2 workshop). Cited for the distillation recipe behind DistilGPT-2, which the paper itself does not describe | search |
+| hu22lora | Hu et al. LoRA: Low-Rank Adaptation of Large Language Models. arXiv:2106.09685, 2021 (preprint) | survey |
+| biderman23 | Biderman et al. Pythia: A Suite for Analyzing Large Language Models Across Training and Scaling. ICML 2023, arXiv:2304.01373 | search |
+| pillutla21 | Pillutla et al. MAUVE: Measuring the Gap Between Neural Text and Human Text using Divergence Frontiers. NeurIPS 2021 (Oral) | survey |
+| roy07 | Roy and Vetterli. The Effective Rank: A Measure of Effective Dimensionality. EUSIPCO 2007 | survey |
+| ethayarajh19 | Ethayarajh. How Contextual are Contextualized Word Representations? Comparing the Geometry of BERT, ELMo, and GPT-2 Embeddings. EMNLP 2019 | survey |
+
 ## Not cited yet, kept for the background
 `scaria25`: Scaria et al. Sensitivity of Small Language Models to Fine-tuning Data Contamination,
 arXiv:2511.06763, 2025-11-10 (*abstract*). `xie26`: Xie and Hu. Reviewing Model Collapse and
-Countermeasures, arXiv:2608.21366; the survey lists IEEE AAIML 2026, but the abstract page says
-submitted 2026-06-17, so the venue needs checking. Cite them where §2 discusses dose-response on
-small models and collapse reviews.
+Countermeasures, arXiv:2608.21366 (*abstract*); the survey lists IEEE AAIML 2026, which a search on
+2026-11-22 did not find, so cite it as an arXiv preprint. `reimers19`: Reimers and Gurevych.
+Sentence-BERT, EMNLP 2019, arXiv:1908.10084 (*search*), and `wang20minilm`: Wang et al. MiniLM,
+NeurIPS 2020, arXiv:2002.10957 (*search*): the `sem` features use `all-MiniLM-L6-v2` embeddings; cite
+them where a section names that model. Cite `scaria25` and `xie26` where §2 discusses dose-response
+on small models and collapse reviews.
 
 ## Open items
-- [ ] Resolve `unverified-A9`: find the paper or drop the citation.
-- [ ] Verify the ICLR 2026 version of `yi25`, and confirm the venue of `xie26`.
+- [x] `unverified-A9` resolved as `he24safe` (2026-11-22); `yi25` confirmed in the ICLR 2026 program; `xie26`
+  venue not found, so it is cited as a preprint.
 - [ ] Full author lists, and the target venue's reference style, at formatting.
-- [ ] Add references for LoRA, MAUVE, effective rank and anisotropy (`LITERATURE_SURVEY.md` §4)
-  where `track_a.md` and `track_c.md` name those methods.
-- [ ] `track_a.md` and `track_b.md` still cite by number or name; convert them when Track A's
-  section is merged.
+- [x] References for LoRA, MAUVE, effective rank, anisotropy, GPT-2, DistilGPT-2, Pythia, TracIn and
+  split conformal are in, and cited at first mention in `track_a.md`, `track_b.md` and `track_c.md`.
+- [x] `track_a.md` and `track_b.md` use keys (their one named citation, LESS, is now `[xia24less]`).

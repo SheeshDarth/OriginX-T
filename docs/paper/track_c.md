@@ -5,7 +5,7 @@ WikiText-2 only. Sections marked PENDING wait on the CP0 decisions (`docs/CP0_DE
 the TinyStories grid (#58) or the X2 target model; no verdict in them has been computed.*
 
 ## 1. Experimental setup
-Every cell fine-tunes DistilGPT-2 (82M) with LoRA (r = 8, lr 2e-4, 1 epoch, batch 8, max length
+Every cell fine-tunes DistilGPT-2 (82M) [sanh19] with LoRA [hu22lora] (r = 8, lr 2e-4, 1 epoch, batch 8, max length
 256) on 1,000 samples, and is scored on 200 hidden-holdout texts that no pipeline stage may
 train on (`reports/grid/summary.json`, config fingerprint `d497f2268060`). A cell is one
 (contamination type, ratio, seed). The grid is 5 types × 5 ratios {0, 0.25, 0.5, 0.75, 1} × 3
@@ -49,8 +49,8 @@ already above the noise floor, the spread of the three ratio-0 runs (56.39-56.87
 
 ## 3. White-box signals on the checkpoints
 For each of the 66 grid checkpoints we measure, on the hidden-holdout probe texts
-(`src/evaluation/whitebox.py`, `reports/grid/whitebox_summary.json`): effective rank and
-participation ratio of the last-layer representations, anisotropy, the fraction of dead MLP
+(`src/evaluation/whitebox.py`, `reports/grid/whitebox_summary.json`): effective rank [roy07] and
+participation ratio of the last-layer representations, anisotropy [ethayarajh19], the fraction of dead MLP
 units, the stable rank of the attention weights, and the relative norm of the update
 (`delta_rel_norm`).
 
@@ -112,7 +112,7 @@ anisotropy separates the arms by step 20 of 125.
 1. A healthy band per signal and step (median and spread of the change since step 0) from 10
    clean runs.
 2. A run's score is its largest two-sided deviation over all signals and steps.
-3. **Split conformal on 20 separate healthy runs** sets the threshold, so a healthy run ever
+3. **Split conformal [angelopoulos21] on 20 separate healthy runs** sets the threshold, so a healthy run ever
    alarms with probability ≤ α = 0.05 (this needs ≥ 19 calibration runs).
 4. A **breach** is the same machinery on the holdout loss, one-sided: the first step at which a
    run's loss change is above the healthy band by the loss's own threshold.
@@ -135,7 +135,7 @@ method [wang26rank] calibrates on 2 and false-alarms on 3 of 3 held-out healthy 
 collapse (`docs/STRETCH_GOALS.md`, #112).
 
 ## 6. X2: does a small model's damage predict a bigger one's? (passed)
-Proxy: the DistilGPT-2 WikiText grid. Target: Pythia-410M, plain LoRA on the same pools
+Proxy: the DistilGPT-2 WikiText grid. Target: Pythia-410M [biderman23], plain LoRA on the same pools
 (`pools_from`), 4 types × ratios {0, 0.5, 1} × 3 seeds (`reports/x2/`). Damage is holdout
 perplexity over the same seed's ratio-0 perplexity, minus 1. **Result: Spearman ρ = 0.78,
 95% bootstrap CI [0.51, 0.91] on 24 matched pairs** (`reports/x2/gate_x2.json`; figure `reports/figures/x2_scatter.png`; bar ρ ≥ 0.7
