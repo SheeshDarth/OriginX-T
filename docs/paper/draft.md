@@ -18,7 +18,7 @@ multi-feature model beats a simple detector. White-box training signals separate
 contaminated from clean runs, yet the early-warning gate failed on both datasets, and a live,
 conformally calibrated alarm met its false-alarm bar (6%) but missed its early-alarm bar (44%
 against 50%). A small model's damage does predict a larger model's: Spearman rho 0.78, 95% CI
-[0.51, 0.91], against Pythia-410M. In a full repair grid replicated on independent pools, harm-guided
+[0.51, 0.91], against Pythia-410M. In the full repair grid (240 retrains), harm-guided
 repair beats random (Gate X1) but does not beat cleaning by origin, and on leaked benchmark items it
 is the worst strategy.
 We report the failed gates as written.
@@ -69,10 +69,12 @@ is provisional until the TinyStories grid):
 - A small-model canary predicts a larger one's damage: Pythia-410M against the DistilGPT-2
   proxy, Spearman ρ 0.78, CI [0.51, 0.91] (Track C §6; X2 passed).
 - In the repair pilot, harm-guided replacement beats random by 36-39 points, but **cleaning by
-  origin ties or beats it** (Track B §5; #122). The full grid, replicated on independent pools,
-  agrees: Gate X1 passes (harm − random 0.25-0.55 on all 9 ratio-0.5 cells), harm − origin is
-  −0.03, CI [−0.07, +0.01], and on benchmark near-copies harm-guided repair recovers nothing
-  (−0.02) while the near-duplicate score matches the oracle (Track B §5; #136).
+  origin ties or beats it** (Track B §5; #122). The official full grid (#64), on the
+  grid's own training sets, agrees: Gate X1 passes (harm − random 0.24-0.47 on all 9 ratio-0.5 cells), harm − origin is
+  −0.047, CI [−0.087, −0.008] (origin cleaning is slightly better), and on benchmark near-copies
+  harm-guided repair recovers almost nothing (0.04) while the near-duplicate score matches the
+  oracle (0.92 against 0.94). An independent-pool replicate (#136) agreed on the gate and on
+  benchmark near-copies (Track B §5).
 
 **Contributions.** We make these claims, narrowed by a second literature search to what we
 could not find elsewhere:
@@ -447,6 +449,43 @@ nothing. Its AUROC for the near-copies is 0.59 (risk_reflm 0.37), while risk_knn
 near-copy of a benchmark item looks like ordinary human text to the model, so neither its
 gradient nor its representation points away from the held-out target.
 
+**Official B9** (2026-11-22; `reports/repair/wikitext2.jsonl`, `wikitext2_summary.json`; #64). The
+full grid on the grid machine, on the grid's own training sets and checkpoints, RTX 2050 with CUDA:
+harm scores for the 21 cells not yet scored, then 240 retrains (24 cells × 7 strategies plus 3
+`+rare` arms; the 12 pilot rows are reused unchanged). At ratio 1 every row is contaminated, so
+k = N and every strategy replaces the whole set: all ratio-1 recoveries are near 1 by
+construction. **Only ratio 0.5 separates the strategies.**
+
+Mean recovery at ratio 0.5 (3 seeds each):
+
+| strategy | synthetic | recursive | paraphrased |
+|---|---|---|---|
+| oracle | 1.07 | 1.07 | 1.09 |
+| risk_guided (origin) | 1.06 | 1.04 | 1.09 |
+| harm_guided | 1.02 | 0.94 | 1.08 |
+| repr_sim | 0.90 | 1.03 | 0.98 |
+| random | 0.66 | 0.62 | 0.63 |
+| knn_guided | 0.51 | 0.46 | 0.67 |
+| perplexity_filter | 0.07 | 0.08 | 0.07 |
+
+- **Gate X1 passes:** harm − random is 0.24–0.47 on every type and seed, above 0.10 on all 9
+  cells, 3 of 3 types (mean +0.378, CI [0.334, 0.418]).
+- **D10 secondary: origin cleaning beats harm, by a few points.** At ratio 0.5, harm − risk_guided
+  = −0.047, 95% CI [−0.087, −0.008] over 9 cells: origin cleaning is better and the interval
+  excludes zero. Pooled over all 18 cells (the summary's number, diluted by the ratio-1 ties) it
+  is −0.024 [−0.049, −0.003]. Harm vs repr_sim at ratio 0.5: +0.042 [−0.025, +0.105], no difference.
+- **On benchmark_near, harm-guided repair is the worst strategy.** Benchmark recovery at ratio
+  0.5: oracle 0.94, knn_guided 0.92, perplexity_filter 0.83, repr_sim 0.64, random 0.33,
+  risk_guided 0.19, harm_guided **0.04**. The D10 secondary on benchmark recovery reads "no
+  difference" (−0.067, CI [−0.134, +0.000], 6 cells), a borderline case. knn_guided, the
+  near-duplicate score, matches the oracle here and is the worst learned strategy on the collapse
+  types (0.46-0.67): each score cleans the contamination it detects.
+- **H5: rare-cluster preservation changes nothing measurable.** `+rare` minus plain at ratio 0.5
+  is +0.010 [−0.013, +0.033] for harm_guided, +0.001 [−0.029, +0.028] for risk_guided and −0.003
+  [−0.046, +0.027] for random; per-cell changes range from −0.5 to +0.4, which is noise.
+- **The perplexity filter is harmful again** and costs the most diversity (distinct-2 0.532
+  against 0.661 for the oracle, collapse types pooled).
+
 **B9 independent-pool replicate** (2026-11-10; `reports/repair_replicate/`). The full grid,
 24 cells × 7 strategies plus 3 `+rare` arms (240 retrains), on pools *regenerated* on
 Siddharth's RTX 4050 with the same config fingerprint and rules. These are not the grid's
@@ -467,9 +506,10 @@ Mean recovery at ratio 0.5 (3 seeds each):
 | perplexity_filter | 0.07 | 0.11 | −0.08 |
 
 - **Gate X1 passes on the replicate:** harm − random is 0.25–0.55 on every type and seed, above
-  0.10 on all 9 cells, 3 of 3 types. (The official verdict is the grid machine's run.)
+  0.10 on all 9 cells, 3 of 3 types. The official run (above) agrees.
 - **D10 secondary: harm does not beat origin cleaning.** At ratio 0.5, harm − risk_guided =
-  −0.031, 95% CI [−0.073, +0.007] over 9 cells: no difference. Harm vs repr_sim: +0.039
+  −0.031, 95% CI [−0.073, +0.007] over 9 cells: no difference here, where the official run
+  found origin cleaning slightly better (−0.047, CI excluding zero). Harm vs repr_sim: +0.039
   [−0.023, +0.103], also no difference. The summary's pooled number (−0.015, 18 cells) is diluted
   by the ratio-1 ties.
 - **On benchmark_near, harm-guided repair is the worst strategy.** Benchmark recovery at ratio 0.5:
@@ -486,9 +526,9 @@ Mean recovery at ratio 0.5 (3 seeds each):
 - **The perplexity filter is harmful again**, as in the pilot, and costs the most diversity
   (distinct-2 0.596 against 0.661 for the oracle, collapse types pooled).
 
-**Still to run:**
-- [ ] The official B9 on the grid machine (`configs/repair.yaml`, #64), to confirm the replicate
-  on the grid's own training sets.
+**Still to run:** nothing for X1. The official B9 (#64) ran on 2026-11-22 and agrees with the
+replicate on Gate X1, the benchmark_near result and H5; it differs on the origin comparison, where
+the official CI excludes zero in origin cleaning's favour and the replicate's did not.
 
 ### 4.6 Limitations
 

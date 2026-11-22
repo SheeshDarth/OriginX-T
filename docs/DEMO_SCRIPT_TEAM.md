@@ -171,7 +171,7 @@ The honest result: the alarm fired before the damage on 8 of 18 collapsing runs,
 
 **[POINT]** the strategy columns. "Each column is a strategy. Random is the floor; oracle, which knows the true labels, is the reference point. Harm-guided, our method, uses gradients to find the records that hurt the model most."
 
-**SIDDHARTH:** "It works: harm-guided beats random by 25 to 55 points on all nine cases, and we replicated the full grid on independent data. But the honest finding is that cleaning by *origin*, simply removing text that looks machine-written, does about as well. Harm minus origin is minus 0.03, so a tie. And on leaked benchmark items harm-guided repair recovers nothing, while a plain near-duplicate score matches the oracle. We also tested a rule to protect rare topics while cleaning. It changed nothing measurable."
+**SIDDHARTH:** "It works: harm-guided beats random by 24 to 47 points on all nine cases, and a second run on independent data agreed. But the honest finding is that cleaning by *origin*, simply removing text that looks machine-written, does slightly better. Harm minus origin is minus 0.05, and the interval excludes zero. And on leaked benchmark items harm-guided repair recovers nothing, while a plain near-duplicate score matches the oracle. We also tested a rule to protect rare topics while cleaning. It changed nothing measurable."
 
 **[CUE]** "Revanth, open Bench." **[CLICK]** nav "Bench".
 
@@ -213,7 +213,7 @@ Thank you. We are happy to take questions."
 
 **Revanth:** 56.6 to 67.6 (generated text, WikiText, all-in) and 68.4 (recursive); the control stays about 56.4. The sample verdict is over 99 percent. Three samples: clean, half recursive, half leaked.
 
-**Siddharth:** five contamination types; 75 cells WikiText, 105 TinyStories, three seeds; 1,000 samples per cell; repair replaces 500 records; harm beats random by 25-55 points on 9 of 9 cases; harm minus origin is -0.03 (a tie); harm recovers nothing on benchmark near-copies; the near-duplicate score matches the oracle.
+**Siddharth:** five contamination types; 75 cells WikiText, 105 TinyStories, three seeds; 1,000 samples per cell; repair replaces 500 records; harm beats random by 24-47 points on 9 of 9 cases; harm minus origin is -0.05, CI [-0.09, -0.01] (origin slightly better); harm recovers almost nothing (0.04) on benchmark near-copies; the near-duplicate score matches the oracle.
 
 **Vishnu:** 22 features; risk model AUROC 0.83 [0.76, 0.90]; conformal coverage 0.81 against 0.90; H2 not shown (within 0.03 within a corpus); six signals every 10 steps; alarm: 8 of 18 early (44 percent, bar 50), 1 of 16 false alarms (6 percent, bar 10); canary rho 0.78, interval [0.51, 0.91], 24 pairs, bar 0.7.
 

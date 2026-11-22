@@ -21,7 +21,7 @@ multi-feature model beats a simple detector. White-box training signals separate
 contaminated from clean runs, yet the early-warning gate failed on both datasets, and a live,
 conformally calibrated alarm met its false-alarm bar (6%) but missed its early-alarm bar (44%
 against 50%). A small model's damage does predict a larger model's: Spearman rho 0.78, 95% CI
-[0.51, 0.91], against Pythia-410M. In a full repair grid replicated on independent pools, harm-guided
+[0.51, 0.91], against Pythia-410M. In the full repair grid (240 retrains), harm-guided
 repair beats random (Gate X1) but does not beat cleaning by origin, and on leaked benchmark items it
 is the worst strategy.
 We report the failed gates as written.
@@ -71,10 +71,12 @@ is provisional until the TinyStories grid):
 - A small-model canary predicts a larger one's damage: Pythia-410M against the DistilGPT-2
   proxy, Spearman ρ 0.78, CI [0.51, 0.91] (Track C §6; X2 passed).
 - In the repair pilot, harm-guided replacement beats random by 36-39 points, but **cleaning by
-  origin ties or beats it** (Track B §5; #122). The full grid, replicated on independent pools,
-  agrees: Gate X1 passes (harm − random 0.25-0.55 on all 9 ratio-0.5 cells), harm − origin is
-  −0.03, CI [−0.07, +0.01], and on benchmark near-copies harm-guided repair recovers nothing
-  (−0.02) while the near-duplicate score matches the oracle (Track B §5; #136).
+  origin ties or beats it** (Track B §5; #122). The official full grid (#64), on the
+  grid's own training sets, agrees: Gate X1 passes (harm − random 0.24-0.47 on all 9 ratio-0.5 cells), harm − origin is
+  −0.047, CI [−0.087, −0.008] (origin cleaning is slightly better), and on benchmark near-copies
+  harm-guided repair recovers almost nothing (0.04) while the near-duplicate score matches the
+  oracle (0.92 against 0.94). An independent-pool replicate (#136) agreed on the gate and on
+  benchmark near-copies (Track B §5).
 
 **Contributions.** We make these claims, narrowed by a second literature search to what we
 could not find elsewhere:
