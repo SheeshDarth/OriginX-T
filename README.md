@@ -5,7 +5,7 @@
 > "Predict whether a dataset will damage an LLM — before the fine-tuning damage becomes visible."
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-teal.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-CP0%3A%20GATE%200%20%2B%202%20passed-green.svg)](#status)
+[![Status](https://img.shields.io/badge/status-all%20gates%20decided-green.svg)](#status)
 [![CI](https://github.com/SheeshDarth/OriginX-T/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
 ORIGIN-T is a final-year AIML research project that audits datasets for synthetic,
@@ -31,19 +31,19 @@ fully visible. It blends three ideas into one coherent system: **ORIGIN**
 
 ## Core features
 
-| # | Feature | Scope | Status (2026-11-02) |
+| # | Feature | Scope | Status (2026-11-22) |
 |---|---------|-------|---------------------|
 | 1 | Controlled contamination generator (synthetic / recursive / paraphrased / benchmark-near / duplicate) + a healthy `human_control` arm | Committed | Done |
-| 2 | Feature suite (lexical, leakage, reference-LM, semantic incl. MAUVE) | Committed | Done on WikiText; TinyStories waits for its grid |
-| 3 | LoRA fine-tuning grid + collapse-curve measurement | Committed | Done on WikiText (75 cells); TinyStories next |
-| 4 | Calibrated risk classifier (degrade / no-degrade) | Committed | Done on WikiText; GATE 1 needs a second dataset |
+| 2 | Feature suite (lexical, leakage, reference-LM, semantic incl. MAUVE) | Committed | Done on WikiText and TinyStories |
+| 3 | LoRA fine-tuning grid + collapse-curve measurement | Committed | Done: WikiText (75 cells) and TinyStories (105 cells) |
+| 4 | Calibrated risk classifier (degrade / no-degrade) | Committed | Done on both datasets; GATE 1 passed (AUROC 0.83) |
 | 5 | Split-conformal risk guarantee | Gated | Built; under-covers (0.81 vs 0.90 on both datasets) |
-| 6 | Discrete-time survival early-warning model | Gated | Not started (only if CP2 is green) |
-| 7 | White-box representational-collapse signals (effective rank, anisotropy) | Gated | Done on 66 checkpoints, and live during training (X3) |
+| 6 | Discrete-time survival early-warning model | Gated | Not started: conformal coverage is below target, so its condition is not met |
+| 7 | White-box representational-collapse signals (effective rank, anisotropy) | Gated | Done on 66 checkpoints and live during training (X3); no early-warning gate passed |
 | 8 | Causal attribution (Shapley) + collapse scaling law | Gated | Not started |
 | 9 | Mitigation: harm-based repair (X1) and rare-cluster preservation | Gated | Pilot go; official full grid (#64, 2026-11-22): X1 passes, origin cleaning is slightly better than harm, rare-cluster preservation has no measurable effect |
-| 10 | **ORIGIN-T-Bench** — released benchmark + leaderboard | Committed (M8) | Not started |
-| 11 | **ORIGIN-T Console**: web UI over a FastAPI backend | Could | Overview, curves, cell detail, audit, repair, live monitor |
+| 10 | **ORIGIN-T-Bench** — released benchmark + leaderboard | Committed (M8) | Built and verified (#139); public release pending (#67) |
+| 11 | **ORIGIN-T Console**: web UI over a FastAPI backend | Could | Done: landing page, upload-and-audit demo, evidence board, curves, cell detail, repair, bench, live monitor, canary |
 
 See [docs/PRD.md](docs/PRD.md) for full scope and [docs/TRD.md](docs/TRD.md) for
 the technical design.
@@ -147,11 +147,18 @@ python -m src.features.scores --dataset wikitext2     # per-sample risk scores (
 python -m src.risk.classifier                         # risk model, conformal sets, baselines, GATE 1
 python -m src.risk.audit my_data.jsonl --grid configs/grid.yaml   # audit a new dataset
 python -m src.evaluation.live --preset x3             # X3: log white-box signals during training
-python -m src.evaluation.alarm --config configs/x3.yaml          # Gate X3 (after CP0 confirms the rule)
+python -m src.evaluation.alarm --config configs/x3.yaml          # Gate X3 verdict
+python -m src.evaluation.canary                                   # Gate X2 verdict (proxy vs target damage)
+python -m src.mitigation.harm --config configs/grid.yaml --cells <cells>   # harm scores for X1
+python -m src.mitigation.repair --config configs/repair.yaml     # the full repair grid (B9, resumable)
+python -m src.evaluation.figures                                  # the Track C paper figures
+python docs/paper/build.py                                        # rebuild the merged paper draft
 ```
 
 The console: `python -m dashboard.api` (http://127.0.0.1:8000, docs at `/docs`), then
-`dashboard/web/README.md` for the UI.
+`dashboard/web/README.md` for the UI. The landing page is `/`, the upload-and-audit demo is
+`/try`, and the gate board is `/overview`. The first audit after the API starts loads the models
+(about a minute); on a laptop, plug in and use a performance power mode, or the GPU slows down a lot.
 
 Every grid in this repo ran on one RTX 2050 (4 GB): DistilGPT-2 + LoRA cells take about
 75 s each. Bigger targets (X2) run on Siddharth's GPU or Colab/Kaggle, see
@@ -173,7 +180,7 @@ status: [docs/PROJECT_REPORT.md](docs/PROJECT_REPORT.md#roadmap).
 
 ## Status
 
-**Snapshot of 2026-11-09 (CP0 decisions merged 2026-11-08; CP1 is 2026-11-20).** Every gate is a rule
+**Snapshot of 2026-11-22: every gate has a verdict.** Next hard date: the CP3 results freeze, 2027-01-04. Every gate is a rule
 fixed before its results existed ([TRD §11](docs/TRD.md#11-gono-go-gates), HANDBOOK §11, §13).
 
 | Gate | Rule (short) | Verdict | Evidence |
@@ -210,10 +217,27 @@ that are grid cells reproduce the grid's holdout perplexity exactly (the rest us
 healthy ones, so damage is a gap, not a turn. Anisotropy separates by step 20 of 125. The
 Gate X3 rule is confirmed in `configs/x3.yaml` (2026-11-08); the verdict (2026-11-08) is a fail: the alarm fired early on 8 of 18 collapsing runs (bar 50%), with 1 of 16 false alarms. Every miss is a ratio-1 run whose breach is at the first logged step, so no lead was possible at a 10-step log interval.
 
-**Next: CP1 (Fri 2026-11-20).** GATE 1 needs the risk model evaluated on both datasets (Track A);
-X1's full repair grid ran officially on 2026-11-22 (#64, Gate X1 passed, origin cleaning
-slightly better than harm) with the B10 rare-cluster rule (#135); the bench release (B12) follows. The three Track C
-verdicts are in: GATE 3 failed, X3 failed, X2 passed. What remains for Track C is the paper (#23).
+**Repair and rare clusters (official B9, 2026-11-22, [#143](https://github.com/SheeshDarth/OriginX-T/pull/143)).**
+The full grid ran on the grid's own training sets (240 rows, 12 of them reused from the pilot; CUDA, about 3 h). Gate X1 passes:
+harm-guided repair beats random replacement by 0.24-0.47 on all nine ratio-0.5 cells. But cleaning
+by origin (the risk score) is slightly better than harm: harm − origin is −0.047 [−0.087, −0.008] at
+ratio 0.5. On leaked benchmark items harm-guided repair recovers 0.04 while the near-duplicate score
+matches the oracle (0.92 against 0.94). Protecting rare clusters changes nothing measurable.
+
+**Console and demo ([#141](https://github.com/SheeshDarth/OriginX-T/pull/141)).** A landing page, a
+Try-it flow (upload or pick a sample, watch the audit's real stages, read the verdict with its
+explanation), the evidence board, curves, repair, bench, live monitor and canary screens. API 1.6.0
+reports each audit stage and its timing. Demo scripts: `docs/DEMO_SCRIPT*.md`.
+
+**Paper (#23).** The merged draft is built from the track sections (`docs/paper/draft.md`), with
+an abstract, a literature refresh (2026-11-09) and a 48-entry bibliography, each entry with its
+verification status. The Track C figures are drawn from committed reports.
+
+**What is left.** Nothing needs a new experiment. Remaining: the public bench release (#67, needs a
+Hugging Face account), the target venue and its template (formatting, full author lists), a final
+consistency pass of every number against its report, and viva rehearsal. Optional, only if time
+allows: an X3 re-run with finer logging as a new registered experiment, and a calibrated
+"predict for this dataset" card on the Canary screen.
 
 <details><summary>Earlier results (GATE 0, GATE 2, benchmark_near, GATE 3 in detail)</summary>
 
