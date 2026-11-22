@@ -634,7 +634,7 @@ warn from; the three never-collapsing trajectories are the control arm. This doe
 signals carry no information: they separate the arms *at* onset (§3), in the wrong direction for
 the rule. We report the failure as written and do not re-score it with the new direction.
 
-**Confirmatory run: failed** (#35, `reports/grid_tinystories/earlywarning.json`). The rule
+**Confirmatory run: failed** (#35, `reports/grid_tinystories/earlywarning.json`; figure: `reports/figures/gate3_tinystories.png`). The rule
 (HANDBOOK §13.3, merged before the verdict) uses ratios {0, 0.05, 0.1, 0.25, 0.5, 0.75, 1},
 two-sided signals, `human_control` negatives, a median lead and Bonferroni α = 0.05/6, on
 TinyStories. Of 15 trajectories, 3 never collapse. No signal passes: AUROC 0.08-0.56 and
@@ -673,7 +673,7 @@ anisotropy separates the arms by step 20 of 125.
 breaching runs, and an observed false-alarm rate ≤ 10% on 16 held-out healthy runs. The 18
 collapsing runs are synthetic, recursive and paraphrased at ratios 0.5 and 1.
 
-**Result: failed** (`reports/x3/gate_x3.json`, WikiText). The alarm fired before the breach on
+**Result: failed** (`reports/x3/gate_x3.json`, WikiText; figure: `reports/figures/x3_alarm.png`). The alarm fired before the breach on
 8 of 18 collapsing runs (44%, bar 50%), with a median lead of 10 steps; 1 of 16 held-out healthy
 runs false-alarmed (6%, bar 10%, passed). Every miss is a ratio-1 run: its breach is at step 10,
 the first logged step, so no lead was possible at a 10-step log interval. The ratio-0.5 runs are
@@ -690,7 +690,7 @@ collapse (`docs/STRETCH_GOALS.md`, #112).
 Proxy: the DistilGPT-2 WikiText grid. Target: Pythia-410M, plain LoRA on the same pools
 (`pools_from`), 4 types × ratios {0, 0.5, 1} × 3 seeds (`reports/x2/`). Damage is holdout
 perplexity over the same seed's ratio-0 perplexity, minus 1. **Result: Spearman ρ = 0.78,
-95% bootstrap CI [0.51, 0.91] on 24 matched pairs** (`reports/x2/gate_x2.json`; bar ρ ≥ 0.7
+95% bootstrap CI [0.51, 0.91] on 24 matched pairs** (`reports/x2/gate_x2.json`; figure `reports/figures/x2_scatter.png`; bar ρ ≥ 0.7
 with the CI above 0): passed. Caveats: the pairing rule was ours (the handbook did not fix it),
 dose drives much of the rank, and the reduced-learning-rate proxy was not run.
 
