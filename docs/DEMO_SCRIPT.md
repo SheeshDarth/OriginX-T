@@ -119,7 +119,7 @@ This is the centre of the demo. Take your time.
 
 **Components:**
 - **Repair table:** strategies side by side (harm-guided, risk-guided, random, perplexity filter, oracle) with recovery, where 100 percent means back to clean.
-- **The finding:** harm-guided repair beats random replacement by 25 to 55 points, so the gate passes. But cleaning by *origin* (removing the records that look machine-written) does just as well. Gradient attribution is a fine tool and not a better one. We report that as it is.
+- **The finding:** harm-guided repair beats random replacement by 24 to 47 points, so the gate passes. But cleaning by *origin* (removing the records that look machine-written) does slightly better, by about 5 points. Gradient attribution is a fine tool and not a better one. We report that as it is.
 - **Bench:** the datasets themselves, browsable by type and ratio. We are packaging them for release so others can test their own detectors against ground truth.
 
 ---

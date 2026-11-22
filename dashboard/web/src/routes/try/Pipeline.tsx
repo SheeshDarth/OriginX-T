@@ -92,6 +92,9 @@ function Scanner({ texts }: { texts: string[] }) {
 /** Shortest time a stage stays on screen, so a fast audit still shows every real stage. */
 export const MIN_DWELL_MS = 650;
 
+/** A stage on screen this long (ms) gets the "taking longer than usual" note. */
+export const SLOW_MS = 90_000;
+
 /** The audit's real stages, driven by the job's stage log. Each is shown for at least MIN_DWELL_MS,
  *  with the time the server actually spent on it; `onSettled` fires once every stage has been shown. */
 export function Pipeline({
@@ -117,11 +120,13 @@ export function Pipeline({
   const [shown, setShown] = useState(0);
   const started = useRef(Date.now());
   const [now, setNow] = useState(Date.now());
+  const [since, setSince] = useState(Date.now());
   useEffect(() => {
     if (shown >= Math.max(target, 0)) return;
     const t = setTimeout(() => setShown((n) => n + 1), dwellMs);
     return () => clearTimeout(t);
   }, [shown, target, dwellMs]);
+  useEffect(() => setSince(Date.now()), [shown]); // when the running stage came on screen
   useEffect(() => {
     if (shown >= STAGES.length) onSettled();
   }, [shown, onSettled]);
@@ -187,6 +192,16 @@ export function Pipeline({
             );
           })}
         </ol>
+        {active >= 0 && active < STAGES.length && now - since > SLOW_MS && (
+          <p
+            role="note"
+            className="mt-3 rounded border border-warn/40 p-3 text-xs text-warn"
+          >
+            This stage is taking longer than usual. On a laptop the GPU slows
+            down a lot on battery or in a quiet power mode: plug in and choose
+            the performance mode. The audit is still running.
+          </p>
+        )}
         <p className="mt-3 text-xs text-muted">
           These are the audit&apos;s real stages and the time each took. Each is
           held on screen for a moment so you can follow; the first run on a

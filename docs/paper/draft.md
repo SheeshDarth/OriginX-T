@@ -18,7 +18,7 @@ multi-feature model beats a simple detector. White-box training signals separate
 contaminated from clean runs, yet the early-warning gate failed on both datasets, and a live,
 conformally calibrated alarm met its false-alarm bar (6%) but missed its early-alarm bar (44%
 against 50%). A small model's damage does predict a larger model's: Spearman rho 0.78, 95% CI
-[0.51, 0.91], against Pythia-410M. In a full repair grid replicated on independent pools, harm-guided
+[0.51, 0.91], against Pythia-410M. In the full repair grid (240 retrains), harm-guided
 repair beats random (Gate X1) but does not beat cleaning by origin, and on leaked benchmark items it
 is the worst strategy.
 We report the failed gates as written.
@@ -69,10 +69,12 @@ is provisional until the TinyStories grid):
 - A small-model canary predicts a larger one's damage: Pythia-410M against the DistilGPT-2
   proxy, Spearman ρ 0.78, CI [0.51, 0.91] (Track C §6; X2 passed).
 - In the repair pilot, harm-guided replacement beats random by 36-39 points, but **cleaning by
-  origin ties or beats it** (Track B §5; #122). The full grid, replicated on independent pools,
-  agrees: Gate X1 passes (harm − random 0.25-0.55 on all 9 ratio-0.5 cells), harm − origin is
-  −0.03, CI [−0.07, +0.01], and on benchmark near-copies harm-guided repair recovers nothing
-  (−0.02) while the near-duplicate score matches the oracle (Track B §5; #136).
+  origin ties or beats it** (Track B §5; #122). The official full grid (#64), on the
+  grid's own training sets, agrees: Gate X1 passes (harm − random 0.24-0.47 on all 9 ratio-0.5 cells), harm − origin is
+  −0.047, CI [−0.087, −0.008] (origin cleaning is slightly better), and on benchmark near-copies
+  harm-guided repair recovers almost nothing (0.04) while the near-duplicate score matches the
+  oracle (0.92 against 0.94). An independent-pool replicate (#136) agreed on the gate and on
+  benchmark near-copies (Track B §5).
 
 **Contributions.** We make these claims, narrowed by a second literature search to what we
 could not find elsewhere:
@@ -119,7 +121,7 @@ predict *damage*, and finds that a single reference-LM loss feature carries most
 
 **Data attribution and repair.** Influence functions are fragile for LLMs and a representation
 baseline can beat them ([li24influence; luo26reweight]); LoRA-gradient selection is cheap [xia24less], and attribution-guided
-removal followed by retraining exists for *safety* degradation [reddy26; li25rept; unverified-A9]; attribution also removes the effect only unreliably in a subliminal-learning
+removal followed by retraining exists for *safety* degradation [reddy26; li25rept; he24safe]; attribution also removes the effect only unreliably in a subliminal-learning
 test [weckbecker26]. Our X1
 applies the recipe to collapse and contamination damage with ground-truth labels and compares it
 head to head with origin cleaning.
@@ -158,8 +160,8 @@ Each grid cell's exact training set (1000 samples, rebuilt from the cached pools
 - **leak:** each text's best `difflib` similarity to the 200 benchmark items (the max, the mean,
   and the share above 0.9). It's case- and whitespace-blind, the same measure the generator's
   ground truth uses.
-- **model** (Track C): loss and token-rank statistics under a fixed GPT-2.
-- **sem** (Track C): embedding crowding, cluster entropy, tail retention and MAUVE against the
+- **model** (Track C): loss and token-rank statistics under a fixed GPT-2 [radford19].
+- **sem** (Track C): embedding crowding, cluster entropy, tail retention and MAUVE [pillutla21] against the
   seed's clean human draw.
 
 All 75 cells have every feature (`reports/features/wikitext2.jsonl`, `lex@1+leak@1+model@1+sem@2`).
@@ -183,7 +185,7 @@ them), so they're excluded from its test fold.
   missing values filled with the training mean, full-batch gradient descent on mean log loss
   + (λ/2)‖w‖², λ = 0.01, run until every gradient component is below 10⁻⁶. It matches
   scikit-learn's solver to every reported digit (`reports/risk/crosscheck.json`).
-- **Split conformal, hand-rolled** (`src/risk/conformal.py`):
+- **Split conformal [angelopoulos21], hand-rolled** (`src/risk/conformal.py`):
   - nonconformity s = 1 − p(true class);
   - q is the ⌈(n+1)(1−α)⌉-th smallest calibration score;
   - the set is every label with 1 − p(y) ≤ q.
@@ -306,7 +308,7 @@ sample is made by us and carries its origin in `source` (`src/ingestion/schema.p
 seed, one draw of human WikiText-2 text is split in two disjoint halves (`grid.draw_human`).
 The first half is the clean training data. The second is the *source* that contamination is
 made from, so a contaminated sample never shares text with a clean one in the same mixture.
-- **synthetic:** pretrained DistilGPT-2 continues each source text (generation 1).
+- **synthetic:** pretrained DistilGPT-2 [sanh19] continues each source text (generation 1).
 - **recursive:** a model fine-tuned on the synthetic pool writes generation 2: the
   collapse-spike recipe, at depth 2.
 - **paraphrased:** DistilGPT-2 asked to rewrite each source text. The base model cannot
@@ -358,15 +360,15 @@ damage than replacing the ones that *look* machine-written?
 
 **Harm scores** (`src/mitigation/harm.py`, §7.3 `scores/1`), computed at each cell's trained
 checkpoint. Both are negated cosines, so higher means more harmful:
-- **harm_lora_grad** (TracIn-style, one checkpoint): −cos(∇ℓ(sample), ∇ℓ̄(target)). A step
+- **harm_lora_grad** (TracIn-style [pruthi20], one checkpoint): −cos(∇ℓ(sample), ∇ℓ̄(target)). A step
   on a sample whose gradient opposes the held-out gradient raises held-out loss. Gradients
-  are taken w.r.t. a fresh rank-8 LoRA adapter on the merged checkpoint. Its zero-initialised
+  are taken w.r.t. a fresh rank-8 LoRA adapter [hu22lora] on the merged checkpoint. Its zero-initialised
   B matrices receive the full weight gradient projected through a fixed random A, about 110k
   numbers per sample. Cosine is used rather than the dot product so short texts don't dominate
-  (LESS, Xia et al. 2024).
+  [xia24less].
 - **harm_repr_sim:** −cos between a sample's mean-pooled last hidden state and the held-out
   centroid, after removing the mean of all embeddings. This is the representation baseline
-  that beat influence functions at flagging harmful fine-tuning data, so it is mandatory.
+  that beat influence functions at flagging harmful fine-tuning data [li24influence], so it is mandatory.
 
 **The target is not the test set.** Recovery is measured on the grid's 200 hidden-holdout
 evaluation texts. The harm target is a *disjoint* draw of 200 texts from the rest of the
@@ -447,6 +449,43 @@ nothing. Its AUROC for the near-copies is 0.59 (risk_reflm 0.37), while risk_knn
 near-copy of a benchmark item looks like ordinary human text to the model, so neither its
 gradient nor its representation points away from the held-out target.
 
+**Official B9** (2026-11-22; `reports/repair/wikitext2.jsonl`, `wikitext2_summary.json`; #64). The
+full grid on the grid machine, on the grid's own training sets and checkpoints, RTX 2050 with CUDA:
+harm scores for the 21 cells not yet scored, then 240 retrains (24 cells × 7 strategies plus 3
+`+rare` arms; the 12 pilot rows are reused unchanged). At ratio 1 every row is contaminated, so
+k = N and every strategy replaces the whole set: all ratio-1 recoveries are near 1 by
+construction. **Only ratio 0.5 separates the strategies.**
+
+Mean recovery at ratio 0.5 (3 seeds each):
+
+| strategy | synthetic | recursive | paraphrased |
+|---|---|---|---|
+| oracle | 1.07 | 1.07 | 1.09 |
+| risk_guided (origin) | 1.06 | 1.04 | 1.09 |
+| harm_guided | 1.02 | 0.94 | 1.08 |
+| repr_sim | 0.90 | 1.03 | 0.98 |
+| random | 0.66 | 0.62 | 0.63 |
+| knn_guided | 0.51 | 0.46 | 0.67 |
+| perplexity_filter | 0.07 | 0.08 | 0.07 |
+
+- **Gate X1 passes:** harm − random is 0.24–0.47 on every type and seed, above 0.10 on all 9
+  cells, 3 of 3 types (mean +0.378, CI [0.334, 0.418]).
+- **D10 secondary: origin cleaning beats harm, by a few points.** At ratio 0.5, harm − risk_guided
+  = −0.047, 95% CI [−0.087, −0.008] over 9 cells: origin cleaning is better and the interval
+  excludes zero. Pooled over all 18 cells (the summary's number, diluted by the ratio-1 ties) it
+  is −0.024 [−0.049, −0.003]. Harm vs repr_sim at ratio 0.5: +0.042 [−0.025, +0.105], no difference.
+- **On benchmark_near, harm-guided repair is the worst strategy.** Benchmark recovery at ratio
+  0.5: oracle 0.94, knn_guided 0.92, perplexity_filter 0.83, repr_sim 0.64, random 0.33,
+  risk_guided 0.19, harm_guided **0.04**. The D10 secondary on benchmark recovery reads "no
+  difference" (−0.067, CI [−0.134, +0.000], 6 cells), a borderline case. knn_guided, the
+  near-duplicate score, matches the oracle here and is the worst learned strategy on the collapse
+  types (0.46-0.67): each score cleans the contamination it detects.
+- **H5: rare-cluster preservation changes nothing measurable.** `+rare` minus plain at ratio 0.5
+  is +0.010 [−0.013, +0.033] for harm_guided, +0.001 [−0.029, +0.028] for risk_guided and −0.003
+  [−0.046, +0.027] for random; per-cell changes range from −0.5 to +0.4, which is noise.
+- **The perplexity filter is harmful again** and costs the most diversity (distinct-2 0.532
+  against 0.661 for the oracle, collapse types pooled).
+
 **B9 independent-pool replicate** (2026-11-10; `reports/repair_replicate/`). The full grid,
 24 cells × 7 strategies plus 3 `+rare` arms (240 retrains), on pools *regenerated* on
 Siddharth's RTX 4050 with the same config fingerprint and rules. These are not the grid's
@@ -467,9 +506,10 @@ Mean recovery at ratio 0.5 (3 seeds each):
 | perplexity_filter | 0.07 | 0.11 | −0.08 |
 
 - **Gate X1 passes on the replicate:** harm − random is 0.25–0.55 on every type and seed, above
-  0.10 on all 9 cells, 3 of 3 types. (The official verdict is the grid machine's run.)
+  0.10 on all 9 cells, 3 of 3 types. The official run (above) agrees.
 - **D10 secondary: harm does not beat origin cleaning.** At ratio 0.5, harm − risk_guided =
-  −0.031, 95% CI [−0.073, +0.007] over 9 cells: no difference. Harm vs repr_sim: +0.039
+  −0.031, 95% CI [−0.073, +0.007] over 9 cells: no difference here, where the official run
+  found origin cleaning slightly better (−0.047, CI excluding zero). Harm vs repr_sim: +0.039
   [−0.023, +0.103], also no difference. The summary's pooled number (−0.015, 18 cells) is diluted
   by the ratio-1 ties.
 - **On benchmark_near, harm-guided repair is the worst strategy.** Benchmark recovery at ratio 0.5:
@@ -486,15 +526,15 @@ Mean recovery at ratio 0.5 (3 seeds each):
 - **The perplexity filter is harmful again**, as in the pilot, and costs the most diversity
   (distinct-2 0.596 against 0.661 for the oracle, collapse types pooled).
 
-**Still to run:**
-- [ ] The official B9 on the grid machine (`configs/repair.yaml`, #64), to confirm the replicate
-  on the grid's own training sets.
+**Still to run:** nothing for X1. The official B9 (#64) ran on 2026-11-22 and agrees with the
+replicate on Gate X1, the benchmark_near result and H5; it differs on the origin comparison, where
+the official CI excludes zero in origin cleaning's favour and the replicate's did not.
 
 ### 4.6 Limitations
 
 - **Scale.** DistilGPT-2 (82M) with LoRA on 1,000-sample sets. The bench makes no claim about
   large models.
-- **One checkpoint.** TracIn is usually summed over several checkpoints. We score only at the
+- **One checkpoint.** TracIn [pruthi20] is usually summed over several checkpoints. We score only at the
   end of a one-epoch fine-tune, and influence is known to change during training.
 - **The budget k uses the true contamination count.** Every strategy gets the same k, so the
   comparison is fair, but a deployed cleaner would have to estimate it.
@@ -512,7 +552,7 @@ the TinyStories grid (#58) or the X2 target model; no verdict in them has been c
 
 ### 5.1 Experimental setup
 
-Every cell fine-tunes DistilGPT-2 (82M) with LoRA (r = 8, lr 2e-4, 1 epoch, batch 8, max length
+Every cell fine-tunes DistilGPT-2 (82M) [sanh19] with LoRA [hu22lora] (r = 8, lr 2e-4, 1 epoch, batch 8, max length
 256) on 1,000 samples, and is scored on 200 hidden-holdout texts that no pipeline stage may
 train on (`reports/grid/summary.json`, config fingerprint `d497f2268060`). A cell is one
 (contamination type, ratio, seed). The grid is 5 types × 5 ratios {0, 0.25, 0.5, 0.75, 1} × 3
@@ -558,8 +598,8 @@ already above the noise floor, the spread of the three ratio-0 runs (56.39-56.87
 ### 5.3 White-box signals on the checkpoints
 
 For each of the 66 grid checkpoints we measure, on the hidden-holdout probe texts
-(`src/evaluation/whitebox.py`, `reports/grid/whitebox_summary.json`): effective rank and
-participation ratio of the last-layer representations, anisotropy, the fraction of dead MLP
+(`src/evaluation/whitebox.py`, `reports/grid/whitebox_summary.json`): effective rank [roy07] and
+participation ratio of the last-layer representations, anisotropy [ethayarajh19], the fraction of dead MLP
 units, the stable rank of the attention weights, and the relative norm of the update
 (`delta_rel_norm`).
 
@@ -594,7 +634,7 @@ warn from; the three never-collapsing trajectories are the control arm. This doe
 signals carry no information: they separate the arms *at* onset (§3), in the wrong direction for
 the rule. We report the failure as written and do not re-score it with the new direction.
 
-**Confirmatory run: failed** (#35, `reports/grid_tinystories/earlywarning.json`). The rule
+**Confirmatory run: failed** (#35, `reports/grid_tinystories/earlywarning.json`; figure: `reports/figures/gate3_tinystories.png`). The rule
 (HANDBOOK §13.3, merged before the verdict) uses ratios {0, 0.05, 0.1, 0.25, 0.5, 0.75, 1},
 two-sided signals, `human_control` negatives, a median lead and Bonferroni α = 0.05/6, on
 TinyStories. Of 15 trajectories, 3 never collapse. No signal passes: AUROC 0.08-0.56 and
@@ -623,7 +663,7 @@ anisotropy separates the arms by step 20 of 125.
 1. A healthy band per signal and step (median and spread of the change since step 0) from 10
    clean runs.
 2. A run's score is its largest two-sided deviation over all signals and steps.
-3. **Split conformal on 20 separate healthy runs** sets the threshold, so a healthy run ever
+3. **Split conformal [angelopoulos21] on 20 separate healthy runs** sets the threshold, so a healthy run ever
    alarms with probability ≤ α = 0.05 (this needs ≥ 19 calibration runs).
 4. A **breach** is the same machinery on the holdout loss, one-sided: the first step at which a
    run's loss change is above the healthy band by the loss's own threshold.
@@ -633,7 +673,7 @@ anisotropy separates the arms by step 20 of 125.
 breaching runs, and an observed false-alarm rate ≤ 10% on 16 held-out healthy runs. The 18
 collapsing runs are synthetic, recursive and paraphrased at ratios 0.5 and 1.
 
-**Result: failed** (`reports/x3/gate_x3.json`, WikiText). The alarm fired before the breach on
+**Result: failed** (`reports/x3/gate_x3.json`, WikiText; figure: `reports/figures/x3_alarm.png`). The alarm fired before the breach on
 8 of 18 collapsing runs (44%, bar 50%), with a median lead of 10 steps; 1 of 16 held-out healthy
 runs false-alarmed (6%, bar 10%, passed). Every miss is a ratio-1 run: its breach is at step 10,
 the first logged step, so no lead was possible at a 10-step log interval. The ratio-0.5 runs are
@@ -647,10 +687,10 @@ collapse (`docs/STRETCH_GOALS.md`, #112).
 
 ### 5.6 X2: does a small model's damage predict a bigger one's? (passed)
 
-Proxy: the DistilGPT-2 WikiText grid. Target: Pythia-410M, plain LoRA on the same pools
+Proxy: the DistilGPT-2 WikiText grid. Target: Pythia-410M [biderman23], plain LoRA on the same pools
 (`pools_from`), 4 types × ratios {0, 0.5, 1} × 3 seeds (`reports/x2/`). Damage is holdout
 perplexity over the same seed's ratio-0 perplexity, minus 1. **Result: Spearman ρ = 0.78,
-95% bootstrap CI [0.51, 0.91] on 24 matched pairs** (`reports/x2/gate_x2.json`; bar ρ ≥ 0.7
+95% bootstrap CI [0.51, 0.91] on 24 matched pairs** (`reports/x2/gate_x2.json`; figure `reports/figures/x2_scatter.png`; bar ρ ≥ 0.7
 with the CI above 0): passed. Caveats: the pairing rule was ours (the handbook did not fix it),
 dose drives much of the rank, and the reduced-learning-rate proxy was not run.
 
@@ -733,7 +773,9 @@ checked, so nobody upgrades a preprint to a venue from memory:*
   (`docs/LITERATURE_SURVEY.md`; the survey's own honesty note applies).
 - ***abstract***: the arXiv abstract page was fetched on 2026-11-09, and title, first author, date
   and venue are as it states.
-- ***unverified***: taken from `docs/STRETCH_GOALS.md` without a check. Verify before submission.
+- ***search***: title, authors and venue confirmed by a web search on 2026-11-22 (one search per
+  entry, results from the publisher, proceedings or arXiv listing; the full text was not read).
+- ***unverified***: taken from `docs/STRETCH_GOALS.md` without a check. None left.
 
 Authors are the first author and "et al." until the final formatting pass. A `preprint` has no
 confirmed venue: say "preprint" in the paper.
@@ -759,7 +801,7 @@ confirmed venue: say "preprint" in the paper.
 | kang25 | Kang et al. Demystifying Synthetic Data in LLM Pre-training. EMNLP 2025 (Main) | survey |
 | du25 | Du et al. Characterizing Model Behavior Under Synthetic Data Training. arXiv:2510.05133, 2025 (preprint) | survey |
 | feng24 | Feng et al. Beyond Model Collapse: Scaling Up with Synthesized Data Requires Verification. arXiv:2406.07515, 2024 (preprint) | survey |
-| yi25 | Yi et al. Escaping Model Collapse via Synthetic Data Verification: Near-term Improvements and Long-term Convergence. arXiv:2510.16657, 2025. `STRETCH_GOALS.md` lists an ICLR 2026 version | survey (arXiv); ICLR version unverified |
+| yi25 | Yi et al. Escaping Model Collapse via Synthetic Data Verification: Near-term Improvements and Long-term Convergence. arXiv:2510.16657, 2025; also in the ICLR 2026 program (poster) | survey (arXiv); ICLR 2026 poster: search |
 | drayson25 | Drayson, Yilmaz and Lampos. Machine-generated text detection prevents language model collapse. EMNLP 2025 (Main), arXiv:2502.15654 | survey |
 
 ### Benchmark contamination
@@ -791,7 +833,8 @@ confirmed venue: say "preprint" in the paper.
 | xia24less | Xia et al. LESS: Selecting Influential Data for Targeted Instruction Tuning. ICML 2024 | abstract |
 | reddy26 | Reddy et al. Follow the Gradient: Tracing Safety Degradation Back to Training Data. arXiv:2610.37481, 2026-10-27 (preprint) | abstract |
 | li25rept | Li et al. Where Did It Go Wrong? Attributing Undesirable LLM Behaviors via Representation Gradient Tracing. arXiv:2510.02334, 2025 (preprint) | abstract |
-| unverified-A9 | "Identifying Benign Data that Breaks Safety", OpenReview x3ceCulAsa. Authors, venue and year unchecked (the page would not load) | **unverified**: find it or drop it |
+| he24safe | He, Xia and Henderson. What's in Your "Safe" Data? Identifying Benign Data that Breaks Safety. arXiv:2404.01099, 2024; presented at ICLR 2024 workshops (the earlier key was `unverified-A9`) | search |
+| pruthi20 | Pruthi et al. Estimating Training Data Influence by Tracing Gradient Descent (TracIn). NeurIPS 2020, arXiv:2002.08484 | search |
 | weckbecker26 | Weckbecker et al. Can Data Attribution Filter Out Subliminal Learning? Not Reliably. arXiv:2609.20027, 2026-09-17 (preprint) | abstract |
 
 ### Predicting fine-tuning outcomes and scale transfer
@@ -813,10 +856,25 @@ confirmed venue: say "preprint" in the paper.
 | wiegrebe24 | Wiegrebe et al. Deep Learning for Survival Analysis: A Review. *Artificial Intelligence Review* 57, art. 65, 2024 | survey |
 | zhou26mamba | Zhou et al. Δt-Mamba3D: A Time-Aware Spatio-Temporal State-Space Model for Breast Cancer Risk Prediction. AAAI 2026 | survey |
 
+### Models and methods we use
+
+| Key | Reference | Status |
+|---|---|---|
+| radford19 | Radford et al. Language Models are Unsupervised Multitask Learners (GPT-2). OpenAI technical report, 2019 (no arXiv version) | search |
+| sanh19 | Sanh et al. DistilBERT, a distilled version of BERT: smaller, faster, cheaper and lighter. arXiv:1910.01108, 2019 (NeurIPS 2019 EMC2 workshop). Cited for the distillation recipe behind DistilGPT-2, which the paper itself does not describe | search |
+| hu22lora | Hu et al. LoRA: Low-Rank Adaptation of Large Language Models. arXiv:2106.09685, 2021 (preprint) | survey |
+| biderman23 | Biderman et al. Pythia: A Suite for Analyzing Large Language Models Across Training and Scaling. ICML 2023, arXiv:2304.01373 | search |
+| pillutla21 | Pillutla et al. MAUVE: Measuring the Gap Between Neural Text and Human Text using Divergence Frontiers. NeurIPS 2021 (Oral) | survey |
+| roy07 | Roy and Vetterli. The Effective Rank: A Measure of Effective Dimensionality. EUSIPCO 2007 | survey |
+| ethayarajh19 | Ethayarajh. How Contextual are Contextualized Word Representations? Comparing the Geometry of BERT, ELMo, and GPT-2 Embeddings. EMNLP 2019 | survey |
+
 ### Not cited yet, kept for the background
 
 `scaria25`: Scaria et al. Sensitivity of Small Language Models to Fine-tuning Data Contamination,
 arXiv:2511.06763, 2025-11-10 (*abstract*). `xie26`: Xie and Hu. Reviewing Model Collapse and
-Countermeasures, arXiv:2608.21366; the survey lists IEEE AAIML 2026, but the abstract page says
-submitted 2026-06-17, so the venue needs checking. Cite them where §2 discusses dose-response on
-small models and collapse reviews.
+Countermeasures, arXiv:2608.21366 (*abstract*); the survey lists IEEE AAIML 2026, which a search on
+2026-11-22 did not find, so cite it as an arXiv preprint. `reimers19`: Reimers and Gurevych.
+Sentence-BERT, EMNLP 2019, arXiv:1908.10084 (*search*), and `wang20minilm`: Wang et al. MiniLM,
+NeurIPS 2020, arXiv:2002.10957 (*search*): the `sem` features use `all-MiniLM-L6-v2` embeddings; cite
+them where a section names that model. Cite `scaria25` and `xie26` where §2 discusses dose-response
+on small models and collapse reviews.

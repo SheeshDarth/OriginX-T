@@ -11,8 +11,8 @@ Each grid cell's exact training set (1000 samples, rebuilt from the cached pools
 - **leak:** each text's best `difflib` similarity to the 200 benchmark items (the max, the mean,
   and the share above 0.9). It's case- and whitespace-blind, the same measure the generator's
   ground truth uses.
-- **model** (Track C): loss and token-rank statistics under a fixed GPT-2.
-- **sem** (Track C): embedding crowding, cluster entropy, tail retention and MAUVE against the
+- **model** (Track C): loss and token-rank statistics under a fixed GPT-2 [radford19].
+- **sem** (Track C): embedding crowding, cluster entropy, tail retention and MAUVE [pillutla21] against the
   seed's clean human draw.
 
 All 75 cells have every feature (`reports/features/wikitext2.jsonl`, `lex@1+leak@1+model@1+sem@2`).
@@ -34,7 +34,7 @@ them), so they're excluded from its test fold.
   missing values filled with the training mean, full-batch gradient descent on mean log loss
   + (λ/2)‖w‖², λ = 0.01, run until every gradient component is below 10⁻⁶. It matches
   scikit-learn's solver to every reported digit (`reports/risk/crosscheck.json`).
-- **Split conformal, hand-rolled** (`src/risk/conformal.py`):
+- **Split conformal [angelopoulos21], hand-rolled** (`src/risk/conformal.py`):
   - nonconformity s = 1 − p(true class);
   - q is the ⌈(n+1)(1−α)⌉-th smallest calibration score;
   - the set is every label with 1 − p(y) ≤ q.

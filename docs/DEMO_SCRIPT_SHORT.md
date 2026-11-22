@@ -82,7 +82,7 @@ Revanth drives the laptop. Everyone else ends with a cue ("Revanth, open Repair"
 
 > "Yes. We find the 500 most harmful records, swap them for clean ones, retrain, and measure how much quality comes back. A hundred percent means fully repaired.
 >
-> It works: it beats random replacement by 25 to 55 points. The honest part: simply removing text that looks machine-written works about as well. We report that, because it is true."
+> It works: it beats random replacement by 24 to 47 points. The honest part: simply removing text that looks machine-written works slightly better. We report that, because it is true."
 
 **Cue:** "Revanth, to close."
 

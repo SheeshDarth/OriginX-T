@@ -10,7 +10,7 @@ sample is made by us and carries its origin in `source` (`src/ingestion/schema.p
 seed, one draw of human WikiText-2 text is split in two disjoint halves (`grid.draw_human`).
 The first half is the clean training data. The second is the *source* that contamination is
 made from, so a contaminated sample never shares text with a clean one in the same mixture.
-- **synthetic:** pretrained DistilGPT-2 continues each source text (generation 1).
+- **synthetic:** pretrained DistilGPT-2 [sanh19] continues each source text (generation 1).
 - **recursive:** a model fine-tuned on the synthetic pool writes generation 2: the
   collapse-spike recipe, at depth 2.
 - **paraphrased:** DistilGPT-2 asked to rewrite each source text. The base model cannot
@@ -59,15 +59,15 @@ damage than replacing the ones that *look* machine-written?
 
 **Harm scores** (`src/mitigation/harm.py`, §7.3 `scores/1`), computed at each cell's trained
 checkpoint. Both are negated cosines, so higher means more harmful:
-- **harm_lora_grad** (TracIn-style, one checkpoint): −cos(∇ℓ(sample), ∇ℓ̄(target)). A step
+- **harm_lora_grad** (TracIn-style [pruthi20], one checkpoint): −cos(∇ℓ(sample), ∇ℓ̄(target)). A step
   on a sample whose gradient opposes the held-out gradient raises held-out loss. Gradients
-  are taken w.r.t. a fresh rank-8 LoRA adapter on the merged checkpoint. Its zero-initialised
+  are taken w.r.t. a fresh rank-8 LoRA adapter [hu22lora] on the merged checkpoint. Its zero-initialised
   B matrices receive the full weight gradient projected through a fixed random A, about 110k
   numbers per sample. Cosine is used rather than the dot product so short texts don't dominate
-  (LESS, Xia et al. 2024).
+  [xia24less].
 - **harm_repr_sim:** −cos between a sample's mean-pooled last hidden state and the held-out
   centroid, after removing the mean of all embeddings. This is the representation baseline
-  that beat influence functions at flagging harmful fine-tuning data, so it is mandatory.
+  that beat influence functions at flagging harmful fine-tuning data [li24influence], so it is mandatory.
 
 **The target is not the test set.** Recovery is measured on the grid's 200 hidden-holdout
 evaluation texts. The harm target is a *disjoint* draw of 200 texts from the rest of the
@@ -147,6 +147,43 @@ nothing. Its AUROC for the near-copies is 0.59 (risk_reflm 0.37), while risk_knn
 near-copy of a benchmark item looks like ordinary human text to the model, so neither its
 gradient nor its representation points away from the held-out target.
 
+**Official B9** (2026-11-22; `reports/repair/wikitext2.jsonl`, `wikitext2_summary.json`; #64). The
+full grid on the grid machine, on the grid's own training sets and checkpoints, RTX 2050 with CUDA:
+harm scores for the 21 cells not yet scored, then 240 retrains (24 cells × 7 strategies plus 3
+`+rare` arms; the 12 pilot rows are reused unchanged). At ratio 1 every row is contaminated, so
+k = N and every strategy replaces the whole set: all ratio-1 recoveries are near 1 by
+construction. **Only ratio 0.5 separates the strategies.**
+
+Mean recovery at ratio 0.5 (3 seeds each):
+
+| strategy | synthetic | recursive | paraphrased |
+|---|---|---|---|
+| oracle | 1.07 | 1.07 | 1.09 |
+| risk_guided (origin) | 1.06 | 1.04 | 1.09 |
+| harm_guided | 1.02 | 0.94 | 1.08 |
+| repr_sim | 0.90 | 1.03 | 0.98 |
+| random | 0.66 | 0.62 | 0.63 |
+| knn_guided | 0.51 | 0.46 | 0.67 |
+| perplexity_filter | 0.07 | 0.08 | 0.07 |
+
+- **Gate X1 passes:** harm − random is 0.24–0.47 on every type and seed, above 0.10 on all 9
+  cells, 3 of 3 types (mean +0.378, CI [0.334, 0.418]).
+- **D10 secondary: origin cleaning beats harm, by a few points.** At ratio 0.5, harm − risk_guided
+  = −0.047, 95% CI [−0.087, −0.008] over 9 cells: origin cleaning is better and the interval
+  excludes zero. Pooled over all 18 cells (the summary's number, diluted by the ratio-1 ties) it
+  is −0.024 [−0.049, −0.003]. Harm vs repr_sim at ratio 0.5: +0.042 [−0.025, +0.105], no difference.
+- **On benchmark_near, harm-guided repair is the worst strategy.** Benchmark recovery at ratio
+  0.5: oracle 0.94, knn_guided 0.92, perplexity_filter 0.83, repr_sim 0.64, random 0.33,
+  risk_guided 0.19, harm_guided **0.04**. The D10 secondary on benchmark recovery reads "no
+  difference" (−0.067, CI [−0.134, +0.000], 6 cells), a borderline case. knn_guided, the
+  near-duplicate score, matches the oracle here and is the worst learned strategy on the collapse
+  types (0.46-0.67): each score cleans the contamination it detects.
+- **H5: rare-cluster preservation changes nothing measurable.** `+rare` minus plain at ratio 0.5
+  is +0.010 [−0.013, +0.033] for harm_guided, +0.001 [−0.029, +0.028] for risk_guided and −0.003
+  [−0.046, +0.027] for random; per-cell changes range from −0.5 to +0.4, which is noise.
+- **The perplexity filter is harmful again** and costs the most diversity (distinct-2 0.532
+  against 0.661 for the oracle, collapse types pooled).
+
 **B9 independent-pool replicate** (2026-11-10; `reports/repair_replicate/`). The full grid,
 24 cells × 7 strategies plus 3 `+rare` arms (240 retrains), on pools *regenerated* on
 Siddharth's RTX 4050 with the same config fingerprint and rules. These are not the grid's
@@ -167,9 +204,10 @@ Mean recovery at ratio 0.5 (3 seeds each):
 | perplexity_filter | 0.07 | 0.11 | −0.08 |
 
 - **Gate X1 passes on the replicate:** harm − random is 0.25–0.55 on every type and seed, above
-  0.10 on all 9 cells, 3 of 3 types. (The official verdict is the grid machine's run.)
+  0.10 on all 9 cells, 3 of 3 types. The official run (above) agrees.
 - **D10 secondary: harm does not beat origin cleaning.** At ratio 0.5, harm − risk_guided =
-  −0.031, 95% CI [−0.073, +0.007] over 9 cells: no difference. Harm vs repr_sim: +0.039
+  −0.031, 95% CI [−0.073, +0.007] over 9 cells: no difference here, where the official run
+  found origin cleaning slightly better (−0.047, CI excluding zero). Harm vs repr_sim: +0.039
   [−0.023, +0.103], also no difference. The summary's pooled number (−0.015, 18 cells) is diluted
   by the ratio-1 ties.
 - **On benchmark_near, harm-guided repair is the worst strategy.** Benchmark recovery at ratio 0.5:
@@ -186,14 +224,14 @@ Mean recovery at ratio 0.5 (3 seeds each):
 - **The perplexity filter is harmful again**, as in the pilot, and costs the most diversity
   (distinct-2 0.596 against 0.661 for the oracle, collapse types pooled).
 
-**Still to run:**
-- [ ] The official B9 on the grid machine (`configs/repair.yaml`, #64), to confirm the replicate
-  on the grid's own training sets.
+**Still to run:** nothing for X1. The official B9 (#64) ran on 2026-11-22 and agrees with the
+replicate on Gate X1, the benchmark_near result and H5; it differs on the origin comparison, where
+the official CI excludes zero in origin cleaning's favour and the replicate's did not.
 
 ## 6. Limitations
 - **Scale.** DistilGPT-2 (82M) with LoRA on 1,000-sample sets. The bench makes no claim about
   large models.
-- **One checkpoint.** TracIn is usually summed over several checkpoints. We score only at the
+- **One checkpoint.** TracIn [pruthi20] is usually summed over several checkpoints. We score only at the
   end of a one-epoch fine-tune, and influence is known to change during training.
 - **The budget k uses the true contamination count.** Every strategy gets the same k, so the
   comparison is fair, but a deployed cleaner would have to estimate it.
